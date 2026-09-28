@@ -17,9 +17,7 @@ function char(name: string, partial: Partial<CharacterBuild>): CharacterBuild {
 
 export type NpcEncounter = {
   regulationId: RegulationId
-  /** 表示名（対戦相手名） */
   commanderName: string
-  /** 短い説明 */
   blurb: string
   team: TeamBuild
 }
@@ -33,7 +31,7 @@ export function createNpcEncounter(regulationId: RegulationId): NpcEncounter {
         raceId: 'human',
         icon: { shape: 'diamond', color: 'coral' },
         skillXp: { sword: 2 },
-        abilityIds: ['slash'],
+        abilityIds: ['slash', 'palm_strike'],
         bonusStats: { str: 2, vit: 2 },
         itemIds: ['iron_sword'],
       }),
@@ -41,28 +39,27 @@ export function createNpcEncounter(regulationId: RegulationId): NpcEncounter {
         raceId: 'elf',
         icon: { shape: 'circle', color: 'azure' },
         skillXp: { bow: 2 },
-        abilityIds: ['shot'],
+        abilityIds: ['shot', 'stone_throw'],
         bonusStats: { dex: 3, agi: 1 },
-        itemIds: [],
+        itemIds: ['short_bow'],
       }),
       char('見習い癒', {
         raceId: 'spirit',
         icon: { shape: 'star', color: 'ivory' },
         skillXp: { holy: 2 },
-        abilityIds: ['mend'],
+        abilityIds: ['mend', 'lay_on_hands'],
         bonusStats: { spi: 3, mag: 1 },
-        itemIds: ['potion'],
+        itemIds: ['apprentice_rod'],
       }),
       char('見習い盾', {
         raceId: 'dwarf',
         icon: { shape: 'shield', color: 'slate' },
         skillXp: { guard: 2 },
-        abilityIds: ['bash', 'cover'],
+        abilityIds: ['bash', 'body_block'],
         bonusStats: { vit: 3, str: 1 },
-        itemIds: ['leather'],
+        itemIds: ['wood_shield'],
       }),
     ]
-    // XP 8 / 24, assets ~700
     return {
       regulationId,
       commanderName: '訓練教官',
@@ -78,7 +75,7 @@ export function createNpcEncounter(regulationId: RegulationId): NpcEncounter {
         raceId: 'beastfolk',
         icon: { shape: 'hex', color: 'amber' },
         skillXp: { spear: 4, guard: 1 },
-        abilityIds: ['thrust', 'sweep', 'pierce_line', 'bash'],
+        abilityIds: ['thrust', 'sweep', 'pierce_line', 'body_block'],
         bonusStats: { str: 5, vit: 4, dex: 3 },
         itemIds: ['long_spear', 'leather'],
       }),
@@ -86,7 +83,7 @@ export function createNpcEncounter(regulationId: RegulationId): NpcEncounter {
         raceId: 'elf',
         icon: { shape: 'circle', color: 'azure' },
         skillXp: { bow: 4 },
-        abilityIds: ['shot', 'rain', 'snipe'],
+        abilityIds: ['shot', 'rain', 'snipe', 'stone_throw'],
         bonusStats: { dex: 7, agi: 3, vit: 2 },
         itemIds: ['hunter_bow'],
       }),
@@ -94,7 +91,7 @@ export function createNpcEncounter(regulationId: RegulationId): NpcEncounter {
         raceId: 'spirit',
         icon: { shape: 'star', color: 'emerald' },
         skillXp: { holy: 3, magic: 2 },
-        abilityIds: ['mend', 'bless', 'smite', 'spark'],
+        abilityIds: ['mend', 'bless', 'smite', 'cantrip'],
         bonusStats: { spi: 6, mag: 3 },
         itemIds: ['oak_staff', 'potion'],
       }),
@@ -102,12 +99,11 @@ export function createNpcEncounter(regulationId: RegulationId): NpcEncounter {
         raceId: 'dwarf',
         icon: { shape: 'shield', color: 'slate' },
         skillXp: { guard: 4, sword: 1 },
-        abilityIds: ['bash', 'cover', 'taunt_slam', 'slash'],
+        abilityIds: ['bash', 'cover', 'taunt_slam', 'palm_strike'],
         bonusStats: { vit: 7, str: 4, spi: 1 },
-        itemIds: ['chainmail'],
+        itemIds: ['iron_shield', 'chainmail'],
       }),
     ]
-    // XP ~19 / 48
     return {
       regulationId,
       commanderName: '辺境隊長',
@@ -122,7 +118,7 @@ export function createNpcEncounter(regulationId: RegulationId): NpcEncounter {
       raceId: 'beastfolk',
       icon: { shape: 'diamond', color: 'crimson' },
       skillXp: { sword: 5, shadow: 3 },
-      abilityIds: ['slash', 'cleave', 'breakthrough', 'stab', 'dash_cut'],
+      abilityIds: ['slash', 'cleave', 'breakthrough', 'bare_knuckle', 'shadow_step'],
       bonusStats: { str: 9, agi: 7, vit: 4 },
       itemIds: ['steel_blade', 'boots'],
     }),
@@ -130,7 +126,7 @@ export function createNpcEncounter(regulationId: RegulationId): NpcEncounter {
       raceId: 'elf',
       icon: { shape: 'star', color: 'violet' },
       skillXp: { magic: 6, bow: 2 },
-      abilityIds: ['spark', 'fireball', 'ray', 'tempest', 'shot'],
+      abilityIds: ['spark', 'fireball', 'ray', 'tempest', 'cantrip'],
       bonusStats: { mag: 12, spi: 4, dex: 4 },
       itemIds: ['arcane_rod', 'robe'],
     }),
@@ -138,7 +134,7 @@ export function createNpcEncounter(regulationId: RegulationId): NpcEncounter {
       raceId: 'human',
       icon: { shape: 'hex', color: 'slate' },
       skillXp: { shadow: 5, bow: 3 },
-      abilityIds: ['stab', 'dash_cut', 'fan_knives', 'assassination', 'shot'],
+      abilityIds: ['stab', 'dash_cut', 'fan_knives', 'assassination', 'stone_throw'],
       bonusStats: { agi: 10, dex: 8, str: 2 },
       itemIds: ['dagger', 'leather', 'potion'],
     }),
@@ -146,9 +142,9 @@ export function createNpcEncounter(regulationId: RegulationId): NpcEncounter {
       raceId: 'spirit',
       icon: { shape: 'shield', color: 'amber' },
       skillXp: { command: 4, holy: 3, guard: 1 },
-      abilityIds: ['order', 'coordinated', 'banner', 'mend', 'bless', 'bash'],
+      abilityIds: ['order', 'coordinated', 'banner', 'mend', 'bless', 'body_block'],
       bonusStats: { spi: 8, vit: 4, mag: 2, str: 2 },
-      itemIds: ['amulet', 'chainmail', 'mega_potion'],
+      itemIds: ['amulet', 'chainmail', 'oak_staff'],
     }),
   ]
   return {

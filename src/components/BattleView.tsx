@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ITEMS } from '../data/items'
+import { WEAPON_TYPE_LABELS } from '../data/itemLabels'
 import { ABILITIES } from '../data/skills'
 import {
   applyAction,
@@ -8,9 +9,11 @@ import {
   decideInitiative,
   dist,
   getBattlefieldSize,
+  hasValidAbilityTarget,
   SNAP,
   snapValue,
 } from '../lib/battle'
+import { meetsWeaponRequirement } from '../lib/character'
 import { drawUnitIcon } from '../lib/drawIcon'
 import { runSimpleNpcTurn } from '../lib/npcAi'
 import { actionTypeLabel, baseDamageAt100 } from '../lib/damage'
@@ -59,6 +62,7 @@ export function BattleView(props: Props) {
 
   const isPractice = isNpcBattle
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const logRef = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<BattleState | null>(null)
   const [selectedUid, setSelectedUid] = useState<string | null>(null)
   const [mode, setMode] = useState<SelectMode>('none')
@@ -115,7 +119,7 @@ export function BattleView(props: Props) {
           ...structuredClone(cur),
           phase: 'ended',
           winnerId: localPlayerId,
-          log: ['相手が降参しました', ...cur.log],
+          log: [...cur.log, '相手が降参しました'],
         })
       }
     })
@@ -128,7 +132,7 @@ export function BattleView(props: Props) {
           : decision.method === 'host'
             ? 'ホスト希望により先攻決定'
             : 'ゲスト希望により先攻決定'
-      battle.log.unshift(`${method} → 先攻プレイヤー確定`)
+      battle.log.push(`${method} → 先攻プレイヤー確定`)
       commit(battle)
     } else {
       connection.send({ type: 'ready', playerId: localPlayerId })
@@ -156,6 +160,13 @@ export function BattleView(props: Props) {
     if (!ctx) return
     drawBattle(ctx, state, size, selectedUid, mode, abilityId, cursor, localPlayerId)
   }, [state, selectedUid, mode, abilityId, cursor, localPlayerId, size])
+
+  // ログは上→下の時系列。追記時は最新行が見えるよう末尾へスクロール
+  useEffect(() => {
+    const el = logRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [state?.log.length])
 
   const selected = state?.units.find((u) => u.uid === selectedUid) ?? null
   const myTurn = state?.turnOwnerId === localPlayerId && state.phase === 'playing'
@@ -257,29 +268,42 @@ export function BattleView(props: Props) {
           {selected ? (
             <UnitPanel
               unit={selected}
+              battleState={state}
               mine={selected.ownerId === localPlayerId}
               myTurn={myTurn}
               mode={mode}
               abilityId={abilityId}
-              onMove={() => setMode('move')}
+              onMove={() => setMode(mode === 'move' ? 'none' : 'move')}
               onWait={() => dispatch({ kind: 'wait', unitUid: selected.uid })}
               onAbility={(id) => {
+                if (mode === 'ability' && abilityId === id) {
+                  setAbilityId(null)
+                  setMode('none')
+                  return
+                }
                 setAbilityId(id)
+                setItemId(null)
                 setMode('ability')
               }}
               onItem={(id) => {
+                if (mode === 'item' && itemId === id) {
+                  setItemId(null)
+                  setMode('none')
+                  return
+                }
                 setItemId(id)
+                setAbilityId(null)
                 setMode('item')
               }}
             />
           ) : (
             <p className="hint">
-              自軍ユニットを選択。移動1回・主行動1回・副行動は何度でも。スキルダメージは0〜100%連鎖抽選（規定％以上で追加）。
+              自軍ユニットを選択。移動・主行動は各1回。副行動（回復）は種類ごとに1回。ダメージは基準50%±10。
             </p>
           )}
 
-          <div className="log">
-            {state.log.slice(0, 8).map((line, i) => (
+          <div className="log" ref={logRef}>
+            {state.log.map((line, i) => (
               <p key={`${i}-${line}`}>{line}</p>
             ))}
           </div>
@@ -306,6 +330,7 @@ export function BattleView(props: Props) {
 
 function UnitPanel({
   unit,
+  battleState,
   mine,
   myTurn,
   mode,
@@ -316,6 +341,7 @@ function UnitPanel({
   onItem,
 }: {
   unit: BattleUnit
+  battleState: BattleState
   mine: boolean
   myTurn: boolean
   mode: SelectMode
@@ -333,13 +359,13 @@ function UnitPanel({
         HP {unit.hp}/{unit.maxHp} ／ 移動 {unit.move}
       </p>
       <p>
-        移動: {unit.moved ? '済' : '可'} ／ 主行動: {unit.mainUsed ? '済' : '可'} ／ 副行動: 何度でも
+        移動: {unit.moved ? '済' : '可'} ／ 主行動: {unit.mainUsed ? '済' : '可'} ／ 副行動: 種類ごと1回
       </p>
       {selectedAbility && (
         <p className="hint">
           {selectedAbility.name}（{actionTypeLabel(selectedAbility.actionType)}）基礎威力{' '}
           {selectedAbility.power} ／ 100%時 {baseDamageAt100(unit.character, selectedAbility)}
-          {selectedAbility.heal ? '回復' : 'dmg'} ／ 連鎖 {selectedAbility.cascadeThreshold}%以上
+          {selectedAbility.heal ? '回復' : 'dmg'} ／ 出目 50%±10
         </p>
       )}
       {mine && myTurn && (
@@ -355,7 +381,11 @@ function UnitPanel({
           {unit.character.abilityIds.map((id) => {
             const ab = ABILITIES[id]
             if (!ab) return null
-            const blocked = ab.actionType === 'main' && unit.mainUsed
+            const blockedMain = ab.actionType === 'main' && unit.mainUsed
+            const blockedSub = ab.actionType === 'sub' && unit.usedSubIds.includes(id)
+            const blockedWeapon = !meetsWeaponRequirement(unit.character, ab)
+            const blockedTarget = !hasValidAbilityTarget(battleState, unit, ab)
+            const blocked = blockedMain || blockedSub || blockedWeapon || blockedTarget
             return (
               <button
                 key={id}
@@ -363,11 +393,21 @@ function UnitPanel({
                 className={mode === 'ability' && abilityId === id ? 'primary' : ''}
                 disabled={blocked}
                 onClick={() => onAbility(id)}
+                title={
+                  blockedTarget
+                    ? '射程内に対象がいません'
+                    : blockedWeapon && ab.requiredWeapon
+                      ? `${WEAPON_TYPE_LABELS[ab.requiredWeapon]}が必要`
+                      : blockedSub
+                        ? 'この副行動は使用済み'
+                        : ab.description
+                }
               >
                 {ab.name}
                 <small>
                   {' '}
                   [{actionTypeLabel(ab.actionType)}] 100%={baseDamageAt100(unit.character, ab)}
+                  {ab.requiredWeapon ? ` / ${WEAPON_TYPE_LABELS[ab.requiredWeapon]}` : ' / 武器不要'}
                 </small>
               </button>
             )
@@ -378,11 +418,13 @@ function UnitPanel({
               <button
                 key={id}
                 type="button"
-                disabled={(unit.itemCharges[id] ?? 0) <= 0}
+                disabled={
+                  (unit.itemCharges[id] ?? 0) <= 0 || unit.usedSubIds.includes(`item:${id}`)
+                }
                 onClick={() => onItem(id)}
               >
                 {ITEMS[id].name}×{unit.itemCharges[id] ?? 0}
-                <small> [副]</small>
+                <small> [副·1回]</small>
               </button>
             ))}
           <button type="button" onClick={onWait}>
@@ -393,6 +435,7 @@ function UnitPanel({
     </div>
   )
 }
+
 
 function drawBattle(
   ctx: CanvasRenderingContext2D,

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { ITEM_LIST, ITEMS } from '../data/items'
+import { ITEM_LIST } from '../data/items'
+import { SLOT_LABELS, WEAPON_TYPE_LABELS, formatItemEffects } from '../data/itemLabels'
 import { RACE_LIST, STAT_IDS, STAT_LABELS } from '../data/races'
 import { REGULATIONS } from '../data/regulations'
 import { ABILITIES, SKILL_LINE_LIST, SKILL_LINES } from '../data/skills'
@@ -9,6 +10,7 @@ import {
   computeMove,
   computeStats,
   mainLevel,
+  meetsWeaponRequirement,
   remainingStatPoints,
   skillLevel,
   summarizeBuild,
@@ -125,17 +127,11 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
   }
 
   const toggleItem = (itemId: string) => {
-    const item = ITEMS[itemId]
-    if (!item) return
     if (char.itemIds.includes(itemId)) {
       updateChar({ itemIds: char.itemIds.filter((id) => id !== itemId) })
       return
     }
-    let itemIds = [...char.itemIds]
-    if (item.slot !== 'consumable') {
-      itemIds = itemIds.filter((id) => ITEMS[id]?.slot !== item.slot)
-    }
-    updateChar({ itemIds: [...itemIds, itemId] })
+    updateChar({ itemIds: [...char.itemIds, itemId] })
   }
 
   return (
@@ -325,6 +321,7 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
             <div className="ability-list compact">
               {abilityEntries.map(({ id, ab, open, taken }) => {
                 const dmg100 = baseDamageAt100(char, ab)
+                const weaponOk = meetsWeaponRequirement(char, ab)
                 return (
                   <button
                     key={id}
@@ -342,11 +339,20 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
                           {SKILL_LINES[ab.skillLine].name}
                           {ab.requiredLevel}
                         </em>
+                        {ab.requiredWeapon ? (
+                          <em className={weaponOk ? 'weapon-ok' : 'weapon-missing'}>
+                            {WEAPON_TYPE_LABELS[ab.requiredWeapon]}
+                            {weaponOk ? '' : '不足'}
+                          </em>
+                        ) : (
+                          <em className="weapon-free">武器不要</em>
+                        )}
                       </span>
                     </span>
                     <span className="ability-meta">
                       威力{ab.power} · 100%時{dmg100}
-                      {ab.heal ? '回復' : ''} · 連鎖{ab.cascadeThreshold}%+
+                      {ab.heal ? '回復' : ''} · 出目50%±10
+                      {ab.actionType === 'sub' ? ' · 副(回復)' : ''}
                     </span>
                   </button>
                 )
@@ -404,17 +410,20 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
           <div className="item-grid compact">
             {visibleItems.map((item) => {
               const taken = char.itemIds.includes(item.id)
+              const effects = formatItemEffects(item)
               return (
                 <button
                   key={item.id}
                   type="button"
                   className={taken ? 'item taken' : 'item'}
                   onClick={() => toggleItem(item.id)}
-                  title={item.description}
                 >
                   <strong>
                     {item.name} <em>{item.price}G</em>
                   </strong>
+                  <span className="item-slot">{SLOT_LABELS[item.slot]}</span>
+                  <span className="item-effects">{effects.join(' · ')}</span>
+                  <span className="item-desc">{item.description}</span>
                 </button>
               )
             })}

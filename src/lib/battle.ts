@@ -10,7 +10,7 @@ import type {
   TeamBuild,
 } from '../types/game'
 import { computeMaxHp, computeMove } from './character'
-import { baseDamageAt100, formatCascadeSummary, rollCascadingDamage } from './damage'
+import { baseDamageAt100, formatDamageRoll, rollDamage } from './damage'
 
 export const SNAP = 20
 
@@ -36,6 +36,10 @@ function mulberry32(seed: number) {
   }
 }
 
+function pushLog(state: BattleState, line: string): void {
+  state.log.push(line)
+}
+
 export function createBattle(
   hostId: string,
   guestId: string,
@@ -56,17 +60,18 @@ export function createBattle(
       return createUnit(character, ownerId, snapValue(x), snapValue(y))
     })
 
-  return {
+  const state: BattleState = {
     phase: 'playing',
     turnOwnerId: firstPlayerId,
     turnNumber: 1,
     units: [...place(hostTeam, hostId, 'left'), ...place(guestTeam, guestId, 'right')],
     winnerId: null,
-    log: [
-      '戦闘開始。移動・主行動は各1回、副行動は何度でも可能。ダメージは0〜100%連鎖抽選。',
-    ],
+    log: [],
     seed,
   }
+  pushLog(state, '戦闘開始。移動・主行動は各1回。副行動（回復系）は種類ごとに1回。')
+  pushLog(state, 'ダメージは基準50%±10の乱数です。')
+  return state
 }
 
 export function createUnit(character: CharacterBuild, ownerId: string, x: number, y: number): BattleUnit {
@@ -87,6 +92,7 @@ export function createUnit(character: CharacterBuild, ownerId: string, x: number
     move: computeMove(character),
     mainUsed: false,
     moved: false,
+    usedSubIds: [],
     itemCharges,
   }
 }
@@ -145,6 +151,29 @@ export function pointInAbility(
   return false
 }
 
+/** 現在位置から照準したとき、射程内に有効な対象がいるか */
+export function hasValidAbilityTarget(
+  state: BattleState,
+  unit: BattleUnit,
+  ability: AbilityDef,
+): boolean {
+  for (const target of state.units) {
+    if (target.hp <= 0) continue
+    if (ability.heal) {
+      if (target.ownerId !== unit.ownerId) continue
+    } else if (target.ownerId === unit.ownerId) {
+      continue
+    }
+    if (ability.range > 0 && dist(unit.x, unit.y, target.x, target.y) > ability.range + 0.1) {
+      continue
+    }
+    if (pointInAbility(ability, unit.x, unit.y, target.x, target.y, target.x, target.y)) {
+      return true
+    }
+  }
+  return false
+}
+
 export function canMoveTo(state: BattleState, unit: BattleUnit, x: number, y: number): boolean {
   if (unit.moved || unit.hp <= 0) return false
   const reg = battlefieldFromUnits(state)
@@ -181,13 +210,14 @@ export function applyAction(
       if (u.ownerId === playerId) {
         u.mainUsed = false
         u.moved = false
+        u.usedSubIds = []
       }
     }
     const owners = [...new Set(next.units.map((u) => u.ownerId))]
     const other = owners.find((id) => id !== playerId) ?? playerId
     next.turnOwnerId = other
     next.turnNumber += 1
-    next.log.unshift(`ターン${next.turnNumber}: 手番交代`)
+    pushLog(next, `ターン${next.turnNumber}: 手番交代`)
     return next
   }
 
@@ -199,27 +229,29 @@ export function applyAction(
     unit.x = snapValue(action.x)
     unit.y = snapValue(action.y)
     unit.moved = true
-    next.log.unshift(`${unit.character.name} が移動`)
+    pushLog(next, `${unit.character.name} が移動`)
     return next
   }
 
   if (action.kind === 'wait') {
-    next.log.unshift(`${unit.character.name} の操作を終了`)
+    pushLog(next, `${unit.character.name} の操作を終了`)
     return finishIfNeeded(next)
   }
 
   if (action.kind === 'item') {
-    // 消耗品は副行動扱い（何度でも＝残弾がある限り）
     const charges = unit.itemCharges[action.itemId] ?? 0
     const item = ITEMS[action.itemId]
     if (!item || charges <= 0 || !item.healAmount) return state
+    // 消耗品も副行動扱い：同一アイテムIDはターンに1回
+    if (unit.usedSubIds.includes(`item:${action.itemId}`)) return state
     const target = next.units.find(
       (u) => u.hp > 0 && dist(u.x, u.y, action.tx, action.ty) <= 28,
     )
     if (!target || target.ownerId !== playerId) return state
     target.hp = Math.min(target.maxHp, target.hp + item.healAmount)
     unit.itemCharges[action.itemId] = charges - 1
-    next.log.unshift(`${unit.character.name} が ${item.name} を使用 → ${target.character.name}`)
+    unit.usedSubIds.push(`item:${action.itemId}`)
+    pushLog(next, `${unit.character.name} が ${item.name} を使用 → ${target.character.name}`)
     return finishIfNeeded(next)
   }
 
@@ -228,6 +260,16 @@ export function applyAction(
     const ability = ABILITIES[action.abilityId]
     if (!ability) return state
     if (ability.actionType === 'main' && unit.mainUsed) return state
+    if (ability.actionType === 'sub' && unit.usedSubIds.includes(ability.id)) return state
+
+    if (ability.requiredWeapon) {
+      const ok = unit.character.itemIds.some(
+        (id) => ITEMS[id]?.weaponType === ability.requiredWeapon,
+      )
+      if (!ok) return state
+    }
+
+    if (!hasValidAbilityTarget(next, unit, ability)) return state
 
     const tx = snapValue(action.tx)
     const ty = snapValue(action.ty)
@@ -235,7 +277,7 @@ export function applyAction(
     if (ability.range > 0 && reach > ability.range + 0.1) return state
 
     const base = baseDamageAt100(unit.character, ability)
-    const rolled = rollCascadingDamage(base, ability.cascadeThreshold, next.seed)
+    const rolled = rollDamage(base, next.seed)
     next.seed = rolled.nextSeed
     const amount = rolled.damage
 
@@ -254,11 +296,15 @@ export function applyAction(
       }
     }
 
+    if (hits === 0) return state
+
     if (ability.actionType === 'main') unit.mainUsed = true
+    if (ability.actionType === 'sub') unit.usedSubIds.push(ability.id)
 
     const kind = ability.actionType === 'main' ? '主' : '副'
-    next.log.unshift(
-      `${unit.character.name} の ${ability.name}[${kind}] ${formatCascadeSummary(rolled)} → ${amount}${ability.heal ? '回復' : 'dmg'}${hits ? `×${hits}` : '（外れ）'}`,
+    pushLog(
+      next,
+      `${unit.character.name} の ${ability.name}[${kind}] ${formatDamageRoll(rolled)} → ${amount}${ability.heal ? '回復' : 'dmg'}×${hits}`,
     )
     return finishIfNeeded(next)
   }
@@ -271,7 +317,7 @@ function finishIfNeeded(state: BattleState): BattleState {
   if (winner) {
     state.phase = 'ended'
     state.winnerId = winner
-    state.log.unshift(winner === 'draw' ? '相打ち' : '戦闘終了')
+    pushLog(state, winner === 'draw' ? '相打ち' : '戦闘終了')
   }
   return state
 }
