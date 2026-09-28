@@ -61,13 +61,21 @@ export interface AbilityDef {
   description: string
   skillLine: SkillLineId
   requiredLevel: number
+  /** 主行動はターンに1回、副行動は何度でも */
+  actionType: 'main' | 'sub'
   costAp: number
   range: number
   aoe: number
   shape: 'single' | 'circle' | 'line' | 'cone'
   coneAngle?: number
+  /** 100%時の基礎威力（表示・算出の核） */
   power: number
   powerStat: StatId
+  /**
+   * 連鎖閾値（0〜100）。出目がこの値以上なら追加で 0〜100% を抽選し続ける。
+   * 上限回数なし。
+   */
+  cascadeThreshold: number
   heal?: boolean
   moveBonus?: number
 }
@@ -125,7 +133,8 @@ export interface BattleUnit {
   hp: number
   maxHp: number
   move: number
-  acted: boolean
+  /** 主行動を使い切ったか（副行動は制限なし） */
+  mainUsed: boolean
   moved: boolean
   itemCharges: Record<string, number>
 }

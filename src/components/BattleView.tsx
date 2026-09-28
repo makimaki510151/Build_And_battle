@@ -13,6 +13,7 @@ import {
 } from '../lib/battle'
 import { drawUnitIcon } from '../lib/drawIcon'
 import { runSimpleNpcTurn } from '../lib/npcAi'
+import { actionTypeLabel, baseDamageAt100 } from '../lib/damage'
 import type { MatchConnection } from '../lib/matchmaking'
 import type {
   AbilityDef,
@@ -273,7 +274,7 @@ export function BattleView(props: Props) {
             />
           ) : (
             <p className="hint">
-              自軍ユニットを選択。移動は円範囲＋{SNAP}pxスナップ。スキルは円・直線・扇で範囲表示。
+              自軍ユニットを選択。移動1回・主行動1回・副行動は何度でも。スキルダメージは0〜100%連鎖抽選（規定％以上で追加）。
             </p>
           )}
 
@@ -324,6 +325,7 @@ function UnitPanel({
   onAbility: (id: string) => void
   onItem: (id: string) => void
 }) {
+  const selectedAbility = abilityId ? ABILITIES[abilityId] : null
   return (
     <div className="unit-panel">
       <h3>{unit.character.name}</h3>
@@ -331,43 +333,60 @@ function UnitPanel({
         HP {unit.hp}/{unit.maxHp} ／ 移動 {unit.move}
       </p>
       <p>
-        {unit.moved ? '移動済' : '未移動'} ／ {unit.acted ? '行動済' : '未行動'}
+        移動: {unit.moved ? '済' : '可'} ／ 主行動: {unit.mainUsed ? '済' : '可'} ／ 副行動: 何度でも
       </p>
+      {selectedAbility && (
+        <p className="hint">
+          {selectedAbility.name}（{actionTypeLabel(selectedAbility.actionType)}）基礎威力{' '}
+          {selectedAbility.power} ／ 100%時 {baseDamageAt100(unit.character, selectedAbility)}
+          {selectedAbility.heal ? '回復' : 'dmg'} ／ 連鎖 {selectedAbility.cascadeThreshold}%以上
+        </p>
+      )}
       {mine && myTurn && (
         <div className="cta-col">
           <button
             type="button"
             className={mode === 'move' ? 'primary' : ''}
-            disabled={unit.moved || unit.acted}
+            disabled={unit.moved}
             onClick={onMove}
           >
             移動
           </button>
-          {unit.character.abilityIds.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className={mode === 'ability' && abilityId === id ? 'primary' : ''}
-              disabled={unit.acted}
-              onClick={() => onAbility(id)}
-            >
-              {ABILITIES[id]?.name ?? id}
-            </button>
-          ))}
+          {unit.character.abilityIds.map((id) => {
+            const ab = ABILITIES[id]
+            if (!ab) return null
+            const blocked = ab.actionType === 'main' && unit.mainUsed
+            return (
+              <button
+                key={id}
+                type="button"
+                className={mode === 'ability' && abilityId === id ? 'primary' : ''}
+                disabled={blocked}
+                onClick={() => onAbility(id)}
+              >
+                {ab.name}
+                <small>
+                  {' '}
+                  [{actionTypeLabel(ab.actionType)}] 100%={baseDamageAt100(unit.character, ab)}
+                </small>
+              </button>
+            )
+          })}
           {unit.character.itemIds
             .filter((id) => ITEMS[id]?.slot === 'consumable')
             .map((id) => (
               <button
                 key={id}
                 type="button"
-                disabled={unit.acted || (unit.itemCharges[id] ?? 0) <= 0}
+                disabled={(unit.itemCharges[id] ?? 0) <= 0}
                 onClick={() => onItem(id)}
               >
                 {ITEMS[id].name}×{unit.itemCharges[id] ?? 0}
+                <small> [副]</small>
               </button>
             ))}
           <button type="button" onClick={onWait}>
-            待機
+            このキャラの操作を終える
           </button>
         </div>
       )}

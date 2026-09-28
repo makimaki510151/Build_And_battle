@@ -9,7 +9,8 @@ import type {
   CharacterBuild,
   TeamBuild,
 } from '../types/game'
-import { computeMaxHp, computeMove, computeStats } from './character'
+import { computeMaxHp, computeMove } from './character'
+import { baseDamageAt100, formatCascadeSummary, rollCascadingDamage } from './damage'
 
 export const SNAP = 20
 
@@ -61,7 +62,9 @@ export function createBattle(
     turnNumber: 1,
     units: [...place(hostTeam, hostId, 'left'), ...place(guestTeam, guestId, 'right')],
     winnerId: null,
-    log: ['戦闘開始。プレイヤー単位で行動します。'],
+    log: [
+      '戦闘開始。移動・主行動は各1回、副行動は何度でも可能。ダメージは0〜100%連鎖抽選。',
+    ],
     seed,
   }
 }
@@ -82,7 +85,7 @@ export function createUnit(character: CharacterBuild, ownerId: string, x: number
     hp: maxHp,
     maxHp,
     move: computeMove(character),
-    acted: false,
+    mainUsed: false,
     moved: false,
     itemCharges,
   }
@@ -98,12 +101,6 @@ export function checkWinner(state: BattleState): string | null {
   if (surviving.length === 1) return surviving[0]
   if (surviving.length === 0) return 'draw'
   return null
-}
-
-function abilityDamage(ability: AbilityDef, attacker: BattleUnit): number {
-  const stats = computeStats(attacker.character)
-  const level = Math.max(...Object.values(attacker.character.skillXp), 0)
-  return Math.round(ability.power + stats[ability.powerStat] * 1.4 + level * 1.5)
 }
 
 export function pointInAbility(
@@ -149,7 +146,7 @@ export function pointInAbility(
 }
 
 export function canMoveTo(state: BattleState, unit: BattleUnit, x: number, y: number): boolean {
-  if (unit.moved || unit.acted || unit.hp <= 0) return false
+  if (unit.moved || unit.hp <= 0) return false
   const reg = battlefieldFromUnits(state)
   const sx = snapValue(x)
   const sy = snapValue(y)
@@ -162,7 +159,6 @@ export function canMoveTo(state: BattleState, unit: BattleUnit, x: number, y: nu
 }
 
 function battlefieldFromUnits(state: BattleState): { width: number; height: number } {
-  // Infer from unit spread; default normal size
   let maxX = 1000
   let maxY = 700
   for (const u of state.units) {
@@ -183,7 +179,7 @@ export function applyAction(
   if (action.kind === 'end_turn') {
     for (const u of next.units) {
       if (u.ownerId === playerId) {
-        u.acted = false
+        u.mainUsed = false
         u.moved = false
       }
     }
@@ -208,14 +204,12 @@ export function applyAction(
   }
 
   if (action.kind === 'wait') {
-    unit.acted = true
-    unit.moved = true
-    next.log.unshift(`${unit.character.name} は待機`)
+    next.log.unshift(`${unit.character.name} の操作を終了`)
     return finishIfNeeded(next)
   }
 
   if (action.kind === 'item') {
-    if (unit.acted) return state
+    // 消耗品は副行動扱い（何度でも＝残弾がある限り）
     const charges = unit.itemCharges[action.itemId] ?? 0
     const item = ITEMS[action.itemId]
     if (!item || charges <= 0 || !item.healAmount) return state
@@ -225,22 +219,26 @@ export function applyAction(
     if (!target || target.ownerId !== playerId) return state
     target.hp = Math.min(target.maxHp, target.hp + item.healAmount)
     unit.itemCharges[action.itemId] = charges - 1
-    unit.acted = true
     next.log.unshift(`${unit.character.name} が ${item.name} を使用 → ${target.character.name}`)
     return finishIfNeeded(next)
   }
 
   if (action.kind === 'ability') {
-    if (unit.acted) return state
     if (!unit.character.abilityIds.includes(action.abilityId)) return state
     const ability = ABILITIES[action.abilityId]
     if (!ability) return state
+    if (ability.actionType === 'main' && unit.mainUsed) return state
+
     const tx = snapValue(action.tx)
     const ty = snapValue(action.ty)
     const reach = ability.range === 0 ? 0 : dist(unit.x, unit.y, tx, ty)
     if (ability.range > 0 && reach > ability.range + 0.1) return state
 
-    const amount = abilityDamage(ability, unit)
+    const base = baseDamageAt100(unit.character, ability)
+    const rolled = rollCascadingDamage(base, ability.cascadeThreshold, next.seed)
+    next.seed = rolled.nextSeed
+    const amount = rolled.damage
+
     let hits = 0
     for (const target of next.units) {
       if (target.hp <= 0) continue
@@ -255,12 +253,12 @@ export function applyAction(
         hits++
       }
     }
-    if (ability.moveBonus && !unit.moved) {
-      // temporary move extension already spent by positioning; mark moved softly
-    }
-    unit.acted = true
+
+    if (ability.actionType === 'main') unit.mainUsed = true
+
+    const kind = ability.actionType === 'main' ? '主' : '副'
     next.log.unshift(
-      `${unit.character.name} の ${ability.name}${hits ? `（${hits}体）` : '（外れ）'}`,
+      `${unit.character.name} の ${ability.name}[${kind}] ${formatCascadeSummary(rolled)} → ${amount}${ability.heal ? '回復' : 'dmg'}${hits ? `×${hits}` : '（外れ）'}`,
     )
     return finishIfNeeded(next)
   }
