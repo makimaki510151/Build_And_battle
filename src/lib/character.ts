@@ -1,13 +1,16 @@
 import { ITEMS } from '../data/items'
+import { WEAPON_TYPE_LABELS } from '../data/itemLabels'
 import { emptyStats, RACES, sumStats, totalStatPoints } from '../data/races'
 import { REGULATIONS } from '../data/regulations'
 import { ABILITIES, SKILL_LINES } from '../data/skills'
 import type {
+  AbilityDef,
   CharacterBuild,
   RegulationId,
   SkillLineId,
   Stats,
   TeamBuild,
+  WeaponType,
 } from '../types/game'
 
 export function createEmptyCharacter(index: number): CharacterBuild {
@@ -103,6 +106,20 @@ export function computeMove(char: CharacterBuild): number {
   return Math.max(60, move)
 }
 
+export function ownedWeaponTypes(char: CharacterBuild): Set<WeaponType> {
+  const set = new Set<WeaponType>()
+  for (const id of char.itemIds) {
+    const wt = ITEMS[id]?.weaponType
+    if (wt) set.add(wt)
+  }
+  return set
+}
+
+export function meetsWeaponRequirement(char: CharacterBuild, ability: AbilityDef): boolean {
+  if (!ability.requiredWeapon) return true
+  return ownedWeaponTypes(char).has(ability.requiredWeapon)
+}
+
 export function unlockedAbilities(char: CharacterBuild): string[] {
   const unlocked: string[] = []
   for (const line of activeSkillLines(char)) {
@@ -165,18 +182,19 @@ export function validateCharacter(
     issues.push({ path: 'stats', message: 'ステータス振りが多すぎます' })
   }
 
-  const slots = { weapon: 0, armor: 0, accessory: 0 }
   for (const itemId of char.itemIds) {
-    const item = ITEMS[itemId]
-    if (!item) {
+    if (!ITEMS[itemId]) {
       issues.push({ path: `item:${itemId}`, message: '不明なアイテム' })
-      continue
     }
-    if (item.slot !== 'consumable') {
-      slots[item.slot]++
-      if (slots[item.slot] > 1) {
-        issues.push({ path: `item:${itemId}`, message: `${item.slot}は1つまで` })
-      }
+  }
+
+  for (const id of char.abilityIds) {
+    const ab = ABILITIES[id]
+    if (ab?.requiredWeapon && !meetsWeaponRequirement(char, ab)) {
+      issues.push({
+        path: `weapon:${id}`,
+        message: `${ab.name}には武器種「${WEAPON_TYPE_LABELS[ab.requiredWeapon]}」が必要です`,
+      })
     }
   }
 

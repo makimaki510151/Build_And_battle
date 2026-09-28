@@ -55,6 +55,10 @@ export interface RaceDef {
   baseStats: Stats
 }
 
+export type WeaponType = 'sword' | 'spear' | 'bow' | 'staff' | 'dagger' | 'shield' | 'axe' | 'mace'
+
+export type ItemSlot = 'weapon' | 'armor' | 'accessory' | 'consumable'
+
 export interface AbilityDef {
   id: string
   name: string
@@ -76,6 +80,8 @@ export interface AbilityDef {
    * 上限回数なし。
    */
   cascadeThreshold: number
+  /** 指定時、該当 weaponType の武器を1つ以上所持している必要あり */
+  requiredWeapon?: WeaponType
   heal?: boolean
   moveBonus?: number
 }
@@ -92,8 +98,10 @@ export interface ItemDef {
   name: string
   description: string
   price: number
-  slot: 'weapon' | 'armor' | 'accessory' | 'consumable'
+  slot: ItemSlot
   bonuses: Partial<Stats>
+  /** 武器の種別（武器スロット向け）。スキルの武器指定と対応 */
+  weaponType?: WeaponType
   hpBonus?: number
   moveBonus?: number
   charges?: number

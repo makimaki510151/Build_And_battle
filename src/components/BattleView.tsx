@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ITEMS } from '../data/items'
+import { WEAPON_TYPE_LABELS } from '../data/itemLabels'
 import { ABILITIES } from '../data/skills'
 import {
   applyAction,
@@ -11,6 +12,7 @@ import {
   SNAP,
   snapValue,
 } from '../lib/battle'
+import { meetsWeaponRequirement } from '../lib/character'
 import { drawUnitIcon } from '../lib/drawIcon'
 import { runSimpleNpcTurn } from '../lib/npcAi'
 import { actionTypeLabel, baseDamageAt100 } from '../lib/damage'
@@ -355,7 +357,9 @@ function UnitPanel({
           {unit.character.abilityIds.map((id) => {
             const ab = ABILITIES[id]
             if (!ab) return null
-            const blocked = ab.actionType === 'main' && unit.mainUsed
+            const blockedMain = ab.actionType === 'main' && unit.mainUsed
+            const blockedWeapon = !meetsWeaponRequirement(unit.character, ab)
+            const blocked = blockedMain || blockedWeapon
             return (
               <button
                 key={id}
@@ -363,11 +367,17 @@ function UnitPanel({
                 className={mode === 'ability' && abilityId === id ? 'primary' : ''}
                 disabled={blocked}
                 onClick={() => onAbility(id)}
+                title={
+                  blockedWeapon && ab.requiredWeapon
+                    ? `${WEAPON_TYPE_LABELS[ab.requiredWeapon]}が必要`
+                    : ab.description
+                }
               >
                 {ab.name}
                 <small>
                   {' '}
                   [{actionTypeLabel(ab.actionType)}] 100%={baseDamageAt100(unit.character, ab)}
+                  {ab.requiredWeapon ? ` / ${WEAPON_TYPE_LABELS[ab.requiredWeapon]}` : ' / 武器不要'}
                 </small>
               </button>
             )

@@ -229,6 +229,13 @@ export function applyAction(
     if (!ability) return state
     if (ability.actionType === 'main' && unit.mainUsed) return state
 
+    if (ability.requiredWeapon) {
+      const ok = unit.character.itemIds.some(
+        (id) => ITEMS[id]?.weaponType === ability.requiredWeapon,
+      )
+      if (!ok) return state
+    }
+
     const tx = snapValue(action.tx)
     const ty = snapValue(action.ty)
     const reach = ability.range === 0 ? 0 : dist(unit.x, unit.y, tx, ty)
