@@ -1,9 +1,13 @@
-import Peer, { type DataConnection } from 'peerjs'
+import { joinRoom, selfId } from 'trystero'
 import type { NetMessage, RegulationId } from '../types/game'
 
 export type ConnectionHandler = (msg: NetMessage) => void
 
-const PREFIX = 'bab-v1'
+/** Unique app namespace so rooms never collide with other Trystero apps. */
+const APP_ID = 'build-and-battle-v1'
+
+type Room = ReturnType<typeof joinRoom>
+type NetAction = ReturnType<Room['makeAction']>
 
 export function randomRoomCode(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -12,17 +16,26 @@ export function randomRoomCode(): string {
   return code
 }
 
-export function peerIdForRoom(code: string): string {
-  return `${PREFIX}-room-${code.toUpperCase()}`
+function roomIdForCode(code: string): string {
+  return `room-${code.toUpperCase()}`
 }
 
-export function peerIdForLobby(regulationId: RegulationId, slot: number): string {
-  return `${PREFIX}-lobby-${regulationId}-${slot}`
+function lobbyRoomId(regulationId: RegulationId): string {
+  // 2-minute buckets so random seekers in the same window meet without a lobby server
+  const bucket = Math.floor(Date.now() / 120_000)
+  return `lobby-${regulationId}-${bucket}`
 }
 
+/**
+ * Serverless P2P match connection.
+ * Signaling uses public Nostr relays via Trystero; game traffic is direct WebRTC (E2E).
+ * No app backend / PeerJS cloud required — works on GitHub Pages as static files.
+ */
 export class MatchConnection {
-  peer: Peer | null = null
-  conn: DataConnection | null = null
+  private room: Room | null = null
+  private net: NetAction | null = null
+  private remotePeerId: string | null = null
+  private paired = false
   private onMessage: ConnectionHandler
   private onStatus: (status: string) => void
   private onPeerConnected: (peerId: string) => void
@@ -41,119 +54,118 @@ export class MatchConnection {
     this.onMessage = handler
   }
 
+  getLocalPeerId(): string {
+    return selfId
+  }
+
   async host(roomCode: string): Promise<string> {
-    await this.destroy()
-    const id = peerIdForRoom(roomCode)
-    this.peer = new Peer(id, { debug: 1 })
-    await waitOpen(this.peer)
-    this.onStatus('ルーム待機中…')
-    this.peer.on('connection', (conn) => {
-      this.bindConn(conn)
-    })
-    this.peer.on('error', (err) => {
-      this.onStatus(`接続エラー: ${err.type}`)
-    })
-    return id
+    await this.openRoom(roomIdForCode(roomCode), 'host')
+    this.onStatus(`ルーム待機中…（コード ${roomCode.toUpperCase()}）`)
+    return roomIdForCode(roomCode)
   }
 
   async join(roomCode: string): Promise<void> {
-    await this.destroy()
-    this.peer = new Peer({ debug: 1 })
-    await waitOpen(this.peer)
+    await this.openRoom(roomIdForCode(roomCode), 'guest')
     this.onStatus('ルームに接続中…')
-    const conn = this.peer.connect(peerIdForRoom(roomCode), { reliable: true })
-    this.bindConn(conn)
   }
 
-  /** Random match: try join lobby slots, else host one. */
+  /**
+   * Random match in a time-bucketed lobby room.
+   * Lower selfId becomes host when the second peer arrives.
+   */
   async random(regulationId: RegulationId): Promise<'host' | 'guest'> {
-    await this.destroy()
-    this.peer = new Peer({ debug: 1 })
-    await waitOpen(this.peer)
+    const roomId = lobbyRoomId(regulationId)
+    this.onStatus('ランダム待機中…（サーバーレスP2P）')
+    await this.openRoom(roomId, 'auto')
 
-    for (let slot = 0; slot < 8; slot++) {
-      const lobbyId = peerIdForLobby(regulationId, slot)
-      const ok = await tryConnect(this.peer, lobbyId)
-      if (ok) {
-        this.bindConn(ok)
-        this.onStatus('ランダムマッチ成立（ゲスト）')
-        return 'guest'
-      }
+    // If a peer is already present, pair immediately
+    const peers = Object.keys(this.room?.getPeers() ?? {})
+    if (peers.length > 0) {
+      const peerId = peers[0]
+      const role = selfId < peerId ? 'host' : 'guest'
+      this.acceptPeer(peerId)
+      return role
     }
 
-    // Host a lobby slot
-    await this.destroy()
-    for (let slot = 0; slot < 8; slot++) {
-      try {
-        const lobbyId = peerIdForLobby(regulationId, slot)
-        this.peer = new Peer(lobbyId, { debug: 1 })
-        await waitOpen(this.peer)
-        this.onStatus('ランダム待機中…')
-        this.peer.on('connection', (conn) => this.bindConn(conn))
-        this.peer.on('error', (err) => this.onStatus(`接続エラー: ${err.type}`))
-        return 'host'
-      } catch {
-        await this.destroy()
+    return await new Promise<'host' | 'guest'>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        reject(new Error('マッチングがタイムアウトしました。もう一度お試しください。'))
+      }, 90_000)
+
+      if (!this.room) {
+        clearTimeout(timer)
+        reject(new Error('ルームを開けませんでした'))
+        return
       }
-    }
-    throw new Error('ロビーを確保できませんでした')
+
+      const prev = this.room.onPeerJoin
+      this.room.onPeerJoin = (peerId) => {
+        prev?.(peerId)
+        if (this.paired) return
+        clearTimeout(timer)
+        const role = selfId < peerId ? 'host' : 'guest'
+        this.acceptPeer(peerId)
+        this.onStatus(
+          role === 'host' ? 'ランダムマッチ成立（ホスト）' : 'ランダムマッチ成立（ゲスト）',
+        )
+        resolve(role)
+      }
+    })
   }
 
   send(msg: NetMessage): void {
-    if (this.conn?.open) this.conn.send(msg)
-  }
-
-  async destroy(): Promise<void> {
-    this.conn?.close()
-    this.conn = null
-    if (this.peer) {
-      this.peer.destroy()
-      this.peer = null
+    if (!this.net) return
+    if (this.remotePeerId) {
+      void this.net.send(msg, { target: this.remotePeerId })
+    } else {
+      void this.net.send(msg)
     }
   }
 
-  private bindConn(conn: DataConnection) {
-    this.conn = conn
-    conn.on('open', () => {
-      this.onStatus('対戦相手と接続しました')
-      this.onPeerConnected(conn.peer)
-    })
-    conn.on('data', (data) => {
-      this.onMessage(data as NetMessage)
-    })
-    conn.on('close', () => this.onStatus('切断されました'))
-    conn.on('error', () => this.onStatus('データチャネルエラー'))
+  async destroy(): Promise<void> {
+    this.paired = false
+    this.remotePeerId = null
+    this.net = null
+    if (this.room) {
+      try {
+        await this.room.leave()
+      } catch {
+        // ignore leave errors during teardown
+      }
+      this.room = null
+    }
   }
-}
 
-function waitOpen(peer: Peer): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const t = window.setTimeout(() => reject(new Error('Peer open timeout')), 12000)
-    peer.on('open', () => {
-      clearTimeout(t)
-      resolve()
-    })
-    peer.on('error', (err) => {
-      clearTimeout(t)
-      reject(err)
-    })
-  })
-}
+  private async openRoom(roomId: string, _mode: 'host' | 'guest' | 'auto'): Promise<void> {
+    await this.destroy()
+    this.room = joinRoom({ appId: APP_ID }, roomId)
+    this.net = this.room.makeAction('bab-net')
 
-function tryConnect(peer: Peer, remoteId: string): Promise<DataConnection | null> {
-  return new Promise((resolve) => {
-    const conn = peer.connect(remoteId, { reliable: true })
-    const timer = window.setTimeout(() => {
-      conn.close()
-      resolve(null)
-    }, 1800)
-    conn.on('open', () => {
-      clearTimeout(timer)
-      resolve(conn)
-    })
-    conn.on('error', () => {
-      clearTimeout(timer)
-      resolve(null)
-    })
-  })
+    this.net.onMessage = (data, { peerId }) => {
+      if (this.remotePeerId && peerId !== this.remotePeerId) return
+      this.onMessage(data as NetMessage)
+    }
+
+    this.room.onPeerJoin = (peerId) => {
+      if (this.paired) return
+      // For host/join rooms: first joiner is the opponent
+      if (_mode === 'host' || _mode === 'guest') {
+        this.acceptPeer(peerId)
+      }
+    }
+
+    this.room.onPeerLeave = (peerId) => {
+      if (peerId === this.remotePeerId) {
+        this.onStatus('切断されました')
+      }
+    }
+  }
+
+  private acceptPeer(peerId: string): void {
+    if (this.paired) return
+    this.paired = true
+    this.remotePeerId = peerId
+    this.onStatus('対戦相手と接続しました（P2P）')
+    this.onPeerConnected(peerId)
+  }
 }

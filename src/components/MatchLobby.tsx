@@ -255,7 +255,8 @@ export function MatchLobby({ teams, playerName, onBack, onMatched }: Props) {
             </button>
           </div>
           <p className="hint">
-            GitHub Pages上でも PeerJS（WebRTC）でリアルタイム対戦します。同じレギュレーションのチーム同士のみ対戦できます。
+            シグナリングは公開Nostrリレー（Trystero）のみ。対戦データは端末同士のWebRTC直接通信です。自前サーバー不要でGitHub
+            Pagesからプレイできます。同じレギュレーションのチーム同士のみ対戦可能です。
           </p>
         </div>
       )}
