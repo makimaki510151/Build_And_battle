@@ -70,7 +70,7 @@ export function createBattle(
     seed,
   }
   pushLog(state, '戦闘開始。移動・主行動は各1回。副行動（回復系）は種類ごとに1回。')
-  pushLog(state, 'ダメージは基準50%±10の乱数です。')
+  pushLog(state, 'ダメージは出目1〜100%の乱数です。')
   return state
 }
 

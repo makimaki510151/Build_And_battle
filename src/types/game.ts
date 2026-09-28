@@ -76,7 +76,7 @@ export interface AbilityDef {
   power: number
   powerStat: StatId
   /**
-   * 連鎖閾値（互換用・現行ダメージは基準50%±10）。
+   * 連鎖閾値（互換用・現行ダメージは出目1〜100%）。
    * @deprecated
    */
   cascadeThreshold: number
