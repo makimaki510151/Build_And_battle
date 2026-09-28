@@ -63,7 +63,7 @@ export function createSampleTeam(regulationId: RegulationId): TeamBuild {
         skillXp: { sword: 4, shadow: 2 },
         abilityIds: ['slash', 'cleave', 'breakthrough', 'stab'],
         bonusStats: { str: 6, agi: 4, vit: 2 },
-        itemIds: ['steel_blade', 'boots'],
+        itemIds: ['steel_blade'],
       }),
       char('遠矢', {
         raceId: 'elf',
@@ -71,7 +71,7 @@ export function createSampleTeam(regulationId: RegulationId): TeamBuild {
         skillXp: { bow: 5 },
         abilityIds: ['shot', 'rain', 'snipe'],
         bonusStats: { dex: 8, agi: 4, vit: 3 },
-        itemIds: ['sniper_bow'],
+        itemIds: ['hunter_bow', 'boots'],
       }),
       char('聖詠', {
         raceId: 'spirit',
@@ -122,7 +122,7 @@ export function createSampleTeam(regulationId: RegulationId): TeamBuild {
         icon: { shape: 'shield', color: 'amber' },
         skillXp: { command: 5, holy: 3, guard: 1 },
         abilityIds: ['order', 'coordinated', 'banner', 'mend', 'bless', 'bash'],
-        bonusStats: { spi: 10, vit: 6, mag: 4, str: 4 },
+        bonusStats: { spi: 8, vit: 6, mag: 3, str: 3 },
         itemIds: ['amulet', 'chainmail'],
       }),
     ]

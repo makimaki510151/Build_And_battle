@@ -76,9 +76,18 @@ export default function App() {
     setView({ name: 'battle', match })
   }
 
+  const goHome = () => setView({ name: 'home' })
+
   return (
     <div className="app-shell">
       <div className="atmosphere" aria-hidden />
+      {view.name !== 'home' && (
+        <nav className="top-nav">
+          <button type="button" className="brand-link" onClick={goHome}>
+            Build & Battle
+          </button>
+        </nav>
+      )}
       {view.name === 'home' && (
         <main className="home">
           <header className="hero">
@@ -209,7 +218,7 @@ export default function App() {
         <TeamBuilder
           team={view.team}
           onChange={(team) => setView({ name: 'builder', team })}
-          onBack={() => setView({ name: 'home' })}
+          onBack={goHome}
           onSave={() => saveCurrent(view.team)}
         />
       )}
@@ -218,7 +227,7 @@ export default function App() {
         <MatchLobby
           teams={teams}
           playerName={playerName}
-          onBack={() => setView({ name: 'home' })}
+          onBack={goHome}
           onMatched={(match) => setView({ name: 'battle', match })}
         />
       )}
@@ -228,7 +237,7 @@ export default function App() {
           {...view.match}
           onExit={() => {
             void view.match.connection.destroy()
-            setView({ name: 'home' })
+            goHome()
           }}
         />
       )}
