@@ -11,6 +11,15 @@ import type {
 } from '../types/game'
 import { computeMaxHp, computeMove } from './character'
 import { baseDamageAt100, formatDamageRoll, rollDamage } from './damage'
+import {
+  applyStatusToUnit,
+  getEffectiveMove,
+  incomingDamageFactor,
+  isBuffKind,
+  outgoingDamageFactor,
+  STATUS_KIND_LABELS,
+  tickStatuses,
+} from './status'
 
 export const SNAP = 20
 
@@ -38,6 +47,17 @@ function mulberry32(seed: number) {
 
 function pushLog(state: BattleState, line: string): void {
   state.log.push(line)
+}
+
+/** 回復・バフは味方、攻撃・デバフは敵 */
+export function abilityTargetsAllies(ability: AbilityDef): boolean {
+  if (ability.heal) return true
+  if (ability.statusEffect) return isBuffKind(ability.statusEffect.kind)
+  return false
+}
+
+export function isStatusAbility(ability: AbilityDef): boolean {
+  return !!ability.statusEffect && !ability.heal
 }
 
 export function createBattle(
@@ -69,7 +89,7 @@ export function createBattle(
     log: [],
     seed,
   }
-  pushLog(state, '戦闘開始。移動・主行動は各1回。副行動（回復系）は種類ごとに1回。')
+  pushLog(state, '戦闘開始。移動・主行動は各1回。副行動（回復／バフ／デバフ）は種類ごとに1回。')
   pushLog(state, 'ダメージは出目1〜100%の乱数です。')
   return state
 }
@@ -94,6 +114,7 @@ export function createUnit(character: CharacterBuild, ownerId: string, x: number
     moved: false,
     usedSubIds: [],
     itemCharges,
+    statuses: [],
   }
 }
 
@@ -157,9 +178,10 @@ export function hasValidAbilityTarget(
   unit: BattleUnit,
   ability: AbilityDef,
 ): boolean {
+  const allies = abilityTargetsAllies(ability)
   for (const target of state.units) {
     if (target.hp <= 0) continue
-    if (ability.heal) {
+    if (allies) {
       if (target.ownerId !== unit.ownerId) continue
     } else if (target.ownerId === unit.ownerId) {
       continue
@@ -180,7 +202,7 @@ export function canMoveTo(state: BattleState, unit: BattleUnit, x: number, y: nu
   const sx = snapValue(x)
   const sy = snapValue(y)
   if (sx < 30 || sy < 30 || sx > reg.width - 30 || sy > reg.height - 30) return false
-  if (dist(unit.x, unit.y, sx, sy) > unit.move + 0.1) return false
+  if (dist(unit.x, unit.y, sx, sy) > getEffectiveMove(unit) + 0.1) return false
   const blocked = state.units.some(
     (u) => u.uid !== unit.uid && u.hp > 0 && dist(u.x, u.y, sx, sy) < 36,
   )
@@ -213,6 +235,7 @@ export function applyAction(
         u.usedSubIds = []
       }
     }
+    tickStatuses(next.units)
     const owners = [...new Set(next.units.map((u) => u.ownerId))]
     const other = owners.find((id) => id !== playerId) ?? playerId
     next.turnOwnerId = other
@@ -276,23 +299,64 @@ export function applyAction(
     const reach = ability.range === 0 ? 0 : dist(unit.x, unit.y, tx, ty)
     if (ability.range > 0 && reach > ability.range + 0.1) return state
 
+    const allies = abilityTargetsAllies(ability)
+    const kind = ability.actionType === 'main' ? '主' : '副'
+
+    // バフ／デバフのみ（威力ロールなし）
+    if (isStatusAbility(ability) && ability.statusEffect) {
+      const spec = ability.statusEffect
+      let hits = 0
+      for (const target of next.units) {
+        if (target.hp <= 0) continue
+        if (!pointInAbility(ability, unit.x, unit.y, tx, ty, target.x, target.y)) continue
+        if (allies ? target.ownerId !== playerId : target.ownerId === playerId) continue
+        applyStatusToUnit(target, {
+          kind: spec.kind,
+          name: ability.name,
+          magnitude: spec.magnitude,
+          turnsLeft: spec.duration,
+          sourceAbilityId: ability.id,
+        })
+        hits++
+      }
+      if (hits === 0) return state
+      if (ability.actionType === 'main') unit.mainUsed = true
+      if (ability.actionType === 'sub') unit.usedSubIds.push(ability.id)
+      const magLabel =
+        spec.kind === 'move_up' || spec.kind === 'move_down'
+          ? `${spec.magnitude}`
+          : `${spec.magnitude}%`
+      pushLog(
+        next,
+        `${unit.character.name} の ${ability.name}[${kind}] → ${STATUS_KIND_LABELS[spec.kind]}${magLabel}×${hits}（${spec.duration}ターン）`,
+      )
+      return finishIfNeeded(next)
+    }
+
     const base = baseDamageAt100(unit.character, ability)
     const rolled = rollDamage(base, next.seed)
     next.seed = rolled.nextSeed
-    const amount = rolled.damage
+    const rolledAmount = rolled.damage
 
     let hits = 0
+    let shown = rolledAmount
     for (const target of next.units) {
       if (target.hp <= 0) continue
       if (!pointInAbility(ability, unit.x, unit.y, tx, ty, target.x, target.y)) continue
       if (ability.heal) {
         if (target.ownerId !== playerId) continue
-        target.hp = Math.min(target.maxHp, target.hp + amount)
+        target.hp = Math.min(target.maxHp, target.hp + rolledAmount)
         hits++
+        shown = rolledAmount
       } else {
         if (target.ownerId === playerId) continue
-        target.hp = Math.max(0, target.hp - amount)
+        const dealt = Math.max(
+          0,
+          Math.round(rolledAmount * outgoingDamageFactor(unit) * incomingDamageFactor(target)),
+        )
+        target.hp = Math.max(0, target.hp - dealt)
         hits++
+        shown = dealt
       }
     }
 
@@ -301,10 +365,9 @@ export function applyAction(
     if (ability.actionType === 'main') unit.mainUsed = true
     if (ability.actionType === 'sub') unit.usedSubIds.push(ability.id)
 
-    const kind = ability.actionType === 'main' ? '主' : '副'
     pushLog(
       next,
-      `${unit.character.name} の ${ability.name}[${kind}] ${formatDamageRoll(rolled)} → ${amount}${ability.heal ? '回復' : 'dmg'}×${hits}`,
+      `${unit.character.name} の ${ability.name}[${kind}] ${formatDamageRoll(rolled)} → ${shown}${ability.heal ? '回復' : 'dmg'}×${hits}`,
     )
     return finishIfNeeded(next)
   }

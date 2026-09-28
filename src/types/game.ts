@@ -65,7 +65,7 @@ export interface AbilityDef {
   description: string
   skillLine: SkillLineId
   requiredLevel: number
-  /** 主行動はターンに1回、副行動は何度でも */
+  /** 主行動はターンに1回、副行動は同一スキル1回（回復／バフ／デバフ） */
   actionType: 'main' | 'sub'
   costAp: number
   range: number
@@ -83,7 +83,38 @@ export interface AbilityDef {
   /** 指定時、該当 weaponType の武器を1つ以上所持している必要あり */
   requiredWeapon?: WeaponType
   heal?: boolean
+  /** 副行動向けバフ／デバフ。付与のみ（威力ロールなし） */
+  statusEffect?: AbilityStatusSpec
   moveBonus?: number
+}
+
+export type StatusKind =
+  | 'atk_up'
+  | 'atk_down'
+  | 'def_up'
+  | 'def_down'
+  | 'move_up'
+  | 'move_down'
+
+/** スキルが付与する状態効果の定義 */
+export interface AbilityStatusSpec {
+  kind: StatusKind
+  /**
+   * atk/def: ％修正（20 → ±20%）
+   * move: 移動力の加算ピクセル
+   */
+  magnitude: number
+  /** 手番交代で1減。付与直後を含めた残ターン */
+  duration: number
+}
+
+/** 戦闘中ユニットに乗っている状態 */
+export interface StatusEffect {
+  kind: StatusKind
+  name: string
+  magnitude: number
+  turnsLeft: number
+  sourceAbilityId: string
 }
 
 export interface SkillLineDef {
@@ -147,6 +178,8 @@ export interface BattleUnit {
   /** このターン既に使った副行動スキルID（同一副行動は1回まで） */
   usedSubIds: string[]
   itemCharges: Record<string, number>
+  /** バフ／デバフ */
+  statuses: StatusEffect[]
 }
 
 export type BattlePhase =

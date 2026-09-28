@@ -17,6 +17,7 @@ import { meetsWeaponRequirement } from '../lib/character'
 import { drawUnitIcon } from '../lib/drawIcon'
 import { runSimpleNpcTurn } from '../lib/npcAi'
 import { actionTypeLabel, baseDamageAt100 } from '../lib/damage'
+import { formatStatuses, getEffectiveMove, STATUS_KIND_LABELS } from '../lib/status'
 import type { MatchConnection } from '../lib/matchmaking'
 import type {
   AbilityDef,
@@ -298,7 +299,7 @@ export function BattleView(props: Props) {
             />
           ) : (
             <p className="hint">
-              自軍ユニットを選択。移動・主行動は各1回。副行動（回復）は種類ごとに1回。ダメージは出目1〜100%。
+              自軍ユニットを選択。移動・主行動は各1回。副行動（回復／バフ／デバフ）は種類ごとに1回。ダメージは出目1〜100%。
             </p>
           )}
 
@@ -356,16 +357,23 @@ function UnitPanel({
     <div className="unit-panel">
       <h3>{unit.character.name}</h3>
       <p>
-        HP {unit.hp}/{unit.maxHp} ／ 移動 {unit.move}
+        HP {unit.hp}/{unit.maxHp} ／ 移動 {getEffectiveMove(unit)}
+        {getEffectiveMove(unit) !== unit.move ? `（基礎${unit.move}）` : ''}
       </p>
       <p>
         移動: {unit.moved ? '済' : '可'} ／ 主行動: {unit.mainUsed ? '済' : '可'} ／ 副行動: 種類ごと1回
       </p>
+      {unit.statuses.length > 0 && <p className="hint">状態: {formatStatuses(unit)}</p>}
       {selectedAbility && (
         <p className="hint">
-          {selectedAbility.name}（{actionTypeLabel(selectedAbility.actionType)}）基礎威力{' '}
-          {selectedAbility.power} ／ 100%時 {baseDamageAt100(unit.character, selectedAbility)}
-          {selectedAbility.heal ? '回復' : 'dmg'} ／ 出目 1〜100%
+          {selectedAbility.name}（{actionTypeLabel(selectedAbility.actionType)}）
+          {selectedAbility.statusEffect
+            ? ` ／ ${STATUS_KIND_LABELS[selectedAbility.statusEffect.kind]}${
+                selectedAbility.statusEffect.kind.includes('move')
+                  ? selectedAbility.statusEffect.magnitude
+                  : `${selectedAbility.statusEffect.magnitude}%`
+              }・${selectedAbility.statusEffect.duration}ターン`
+            : ` 基礎威力 ${selectedAbility.power} ／ 100%時 ${baseDamageAt100(unit.character, selectedAbility)}${selectedAbility.heal ? '回復' : 'dmg'} ／ 出目 1〜100%`}
         </p>
       )}
       {mine && myTurn && (
@@ -406,7 +414,10 @@ function UnitPanel({
                 {ab.name}
                 <small>
                   {' '}
-                  [{actionTypeLabel(ab.actionType)}] 100%={baseDamageAt100(unit.character, ab)}
+                  [{actionTypeLabel(ab.actionType)}]
+                  {ab.statusEffect
+                    ? ` ${STATUS_KIND_LABELS[ab.statusEffect.kind]}`
+                    : ` 100%=${baseDamageAt100(unit.character, ab)}${ab.heal ? '回復' : ''}`}
                   {ab.requiredWeapon ? ` / ${WEAPON_TYPE_LABELS[ab.requiredWeapon]}` : ' / 武器不要'}
                 </small>
               </button>
@@ -475,7 +486,7 @@ function drawBattle(
 
   if (selected && mode === 'move') {
     ctx.beginPath()
-    ctx.arc(selected.x, selected.y, selected.move, 0, Math.PI * 2)
+    ctx.arc(selected.x, selected.y, getEffectiveMove(selected), 0, Math.PI * 2)
     ctx.fillStyle = 'rgba(212, 175, 55, 0.12)'
     ctx.fill()
     ctx.strokeStyle = 'rgba(212, 175, 55, 0.55)'
@@ -499,6 +510,12 @@ function drawBattle(
     ctx.font = '11px "Zen Kaku Gothic New", sans-serif'
     ctx.textAlign = 'center'
     ctx.fillText(unit.character.name, unit.x, unit.y - 28)
+    if (unit.statuses.length > 0) {
+      const label = unit.statuses.map((s) => STATUS_KIND_LABELS[s.kind]).join(' ')
+      ctx.fillStyle = 'rgba(243, 210, 122, 0.95)'
+      ctx.font = '9px "Zen Kaku Gothic New", sans-serif'
+      ctx.fillText(label, unit.x, unit.y - 40)
+    }
     if (unit.uid === selectedUid) {
       ctx.beginPath()
       ctx.arc(unit.x, unit.y, 26, 0, Math.PI * 2)

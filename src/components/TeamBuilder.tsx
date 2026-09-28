@@ -350,9 +350,10 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
                       </span>
                     </span>
                     <span className="ability-meta">
-                      威力{ab.power} · 100%時{dmg100}
-                      {ab.heal ? '回復' : ''} · 出目1〜100%
-                      {ab.actionType === 'sub' ? ' · 副(回復)' : ''}
+                      {ab.statusEffect
+                        ? `${ab.statusEffect.kind.endsWith('_up') ? 'バフ' : 'デバフ'} · ${ab.statusEffect.magnitude}${ab.statusEffect.kind.includes('move') ? 'px' : '%'} · ${ab.statusEffect.duration}T`
+                        : `威力${ab.power} · 100%時${dmg100}${ab.heal ? '回復' : ''} · 出目1〜100%`}
+                      {ab.actionType === 'sub' ? ' · 副' : ''}
                     </span>
                   </button>
                 )
