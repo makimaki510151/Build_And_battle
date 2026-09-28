@@ -16,6 +16,8 @@ export type MatchResult = {
   connection: MatchConnection
   preferFirst: boolean
   remotePreferFirst: boolean
+  /** オフライン NPC テストプレイ */
+  isNpcBattle?: boolean
 }
 
 interface Props {

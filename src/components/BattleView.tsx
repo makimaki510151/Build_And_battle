@@ -12,6 +12,7 @@ import {
   snapValue,
 } from '../lib/battle'
 import { drawUnitIcon } from '../lib/drawIcon'
+import { runSimpleNpcTurn } from '../lib/npcAi'
 import type { MatchConnection } from '../lib/matchmaking'
 import type {
   AbilityDef,
@@ -34,6 +35,7 @@ interface Props {
   preferFirst: boolean
   remotePreferFirst: boolean
   onExit: () => void
+  isNpcBattle?: boolean
 }
 
 type SelectMode = 'none' | 'move' | 'ability' | 'item'
@@ -51,9 +53,10 @@ export function BattleView(props: Props) {
     preferFirst,
     remotePreferFirst,
     onExit,
+    isNpcBattle = false,
   } = props
 
-  const isPractice = remoteName === '訓練AI'
+  const isPractice = isNpcBattle
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [state, setState] = useState<BattleState | null>(null)
   const [selectedUid, setSelectedUid] = useState<string | null>(null)
@@ -131,43 +134,17 @@ export function BattleView(props: Props) {
     }
   }, [])
 
-  // Simple practice AI on enemy turn
+  // Simple NPC AI on enemy turn (test play)
   useEffect(() => {
     if (!state || !isPractice || state.phase !== 'playing') return
     if (state.turnOwnerId !== remotePlayerId) return
     const timer = window.setTimeout(() => {
-      let cur = stateRef.current
+      const cur = stateRef.current
       if (!cur) return
-      const enemies = cur.units.filter((u) => u.ownerId === remotePlayerId && u.hp > 0)
-      for (const unit of enemies) {
-        if (unit.acted) continue
-        const foes = cur.units.filter((u) => u.ownerId === localPlayerId && u.hp > 0)
-        const target = foes.sort(
-          (a, b) => dist(unit.x, unit.y, a.x, a.y) - dist(unit.x, unit.y, b.x, b.y),
-        )[0]
-        if (target) {
-          const ability =
-            unit.character.abilityIds.map((id) => ABILITIES[id]).find((a) => a && !a.heal) ??
-            ABILITIES.bash
-          if (ability && dist(unit.x, unit.y, target.x, target.y) <= ability.range + 40) {
-            cur = applyAction(cur, remotePlayerId, {
-              kind: 'ability',
-              unitUid: unit.uid,
-              abilityId: ability.id,
-              tx: target.x,
-              ty: target.y,
-            })
-          } else {
-            cur = applyAction(cur, remotePlayerId, { kind: 'wait', unitUid: unit.uid })
-          }
-        } else {
-          cur = applyAction(cur, remotePlayerId, { kind: 'wait', unitUid: unit.uid })
-        }
-      }
-      cur = applyAction(cur, remotePlayerId, { kind: 'end_turn' })
-      stateRef.current = cur
-      setState(cur)
-    }, 700)
+      const next = runSimpleNpcTurn(cur, remotePlayerId, localPlayerId)
+      stateRef.current = next
+      setState(next)
+    }, 550)
     return () => clearTimeout(timer)
   }, [state, isPractice, remotePlayerId, localPlayerId])
 
@@ -237,7 +214,7 @@ export function BattleView(props: Props) {
         <div>
           <p className="eyebrow">
             ターン {state.turnNumber} ／ {myTurn ? 'あなたの手番' : `${remoteName} の手番`}
-            {isPractice ? '（練習）' : ''}
+            {isPractice ? '（NPC戦）' : ''}
           </p>
           <h2>
             {localName} vs {remoteName}

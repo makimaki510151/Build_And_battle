@@ -305,6 +305,26 @@ label {
 
 .reg-card button {
   margin-top: 0.5rem;
+  width: 100%;
+}
+
+.npc-box {
+  margin: 0.85rem 0 0.35rem;
+  padding: 0.75rem 0.8rem;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: rgba(8, 18, 14, 0.35);
+}
+
+.npc-box strong {
+  display: block;
+  margin: 0.2rem 0 0.35rem;
+  font-family: var(--font-display);
+  color: var(--brass);
+}
+
+.npc-box .hint {
+  margin: 0 0 0.55rem;
 }
 
 .team-list {
