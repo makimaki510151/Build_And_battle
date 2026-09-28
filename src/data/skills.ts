@@ -1691,7 +1691,7 @@ export const ABILITIES: Record<string, AbilityDef> = {
     actionType: 'sub',
     costAp: 1,
     cascadeThreshold: 50,
-    range: 260,
+    range: 500,
     aoe: 0,
     shape: 'single',
     power: 0,
