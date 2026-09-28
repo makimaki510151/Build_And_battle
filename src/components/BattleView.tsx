@@ -62,6 +62,7 @@ export function BattleView(props: Props) {
 
   const isPractice = isNpcBattle
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const logRef = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<BattleState | null>(null)
   const [selectedUid, setSelectedUid] = useState<string | null>(null)
   const [mode, setMode] = useState<SelectMode>('none')
@@ -159,6 +160,13 @@ export function BattleView(props: Props) {
     if (!ctx) return
     drawBattle(ctx, state, size, selectedUid, mode, abilityId, cursor, localPlayerId)
   }, [state, selectedUid, mode, abilityId, cursor, localPlayerId, size])
+
+  // ログは上→下の時系列。追記時は最新行が見えるよう末尾へスクロール
+  useEffect(() => {
+    const el = logRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [state?.log.length])
 
   const selected = state?.units.find((u) => u.uid === selectedUid) ?? null
   const myTurn = state?.turnOwnerId === localPlayerId && state.phase === 'playing'
@@ -294,9 +302,9 @@ export function BattleView(props: Props) {
             </p>
           )}
 
-          <div className="log">
-            {state.log.slice(-12).map((line, i) => (
-              <p key={`${state.log.length - 12 + i}-${line}`}>{line}</p>
+          <div className="log" ref={logRef}>
+            {state.log.map((line, i) => (
+              <p key={`${i}-${line}`}>{line}</p>
             ))}
           </div>
 
