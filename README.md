@@ -1,36 +1,43 @@
 # Build & Battle
 
-レギュレーション制のキャラビルド × 円・直線測距のSRPG風リアルタイム対戦 Web ゲームです。  
-GitHub Pages での公開を前提に、PeerJS（WebRTC）で P2P マルチプレイします。
+レギュレーション制のキャラクタービルド × 円・直線測距のSRPG風リアルタイム対戦 Web ゲームです。  
+**GitHub Pages はビルド不要**で公開できます（`index.html` + `app/` をそのまま配信）。
 
 ## 遊び方
 
 1. **部隊作成** — 初心者 / 通常 / 上級のレギュレーションを選び、4体のキャラをビルド
-2. **技能とスキル** — チーム総経験値を技能に割り振り（メインLv = 技能Lvの最大値）。スキルラインからスキルを取得
+2. **技能とスキル** — チーム総経験値を技能に割り振り（メインLv = 技能Lvの最大値）
 3. **ステータスと装備** — 種族初期値＋メインLv分の振分。チーム総資産でアイテムを持ち込み
-4. **対戦** — ルームコード / ランダムマッチ / 練習戦
-5. **戦闘** — プレイヤー単位ターン。マス目ではなく移動円＋スナップ座標。スキルは単体・円・直線・扇
+4. **対戦** — ルームコード / ランダムマッチ / 練習戦（サーバーレス P2P）
+5. **戦闘** — プレイヤー単位ターン。移動円＋スナップ。スキルは単体・円・直線・扇
 
-## 開発
+## GitHub Pages（ビルド不要）
+
+リポジトリ直下の次を配信するだけです。
+
+- `index.html`
+- `app/main.js` / `app/main.css`（ブラウザ実行用の完成バンドル）
+- `favicon.svg`
+- `.nojekyll`
+
+Settings → Pages → Source を **Deploy from a branch**、branch `main`、folder `/ (root)` に設定してください。
+
+URL 例: `https://<user>.github.io/Build_And_battle/`
+
+> `src/` を編集したあと見た目を更新したいときだけ `npm run build` で `app/` を再生成してコミットしてください。  
+> Pages 側で `npm install` / `npm run build` は不要です。
+
+## ローカル開発
 
 ```bash
 npm install
-npm run dev
+npm run build      # app/ を生成
+npm run preview    # 静的サーバで確認
 ```
-
-## GitHub Pages へデプロイ
-
-```bash
-npm run deploy
-```
-
-リポジトリ名が `Build_And_battle` のため、`vite.config.ts` の `base` は `/Build_And_battle/` です。  
-Pages の Source を `gh-pages` ブランチに設定してください。
 
 ## 技術
 
-- Vite + React + TypeScript
-- **サーバーレス P2P**: [Trystero](https://github.com/dmotz/trystero)（Nostrリレーでシグナリング）+ WebRTC
-  - アプリ用バックエンド不要。GitHub Pages の静的ファイルだけでリアルタイム対戦可能
-  - ゲームデータはピア間で直接・暗号化送信（リレーにはシグナリング情報のみ）
+- React + TypeScript（開発は `src/`）
+- 配布物は esbuild バンドル（`app/`）— React / Trystero 込み
+- **サーバーレス P2P**: Trystero（Nostr シグナリング）+ WebRTC
 - localStorage（部隊保存）
