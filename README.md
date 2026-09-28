@@ -1,0 +1,2 @@
+# Build_And_battle
+キャラをビルドして戦うTRPG風SRPG
