@@ -17,6 +17,7 @@ import {
   unlockedAbilities,
   validateTeam,
 } from '../lib/character'
+import { actionTypeLabel, baseDamageAt100 } from '../lib/damage'
 import type { CharacterBuild, SkillLineId, TeamBuild } from '../types/game'
 import { IconPicker } from './IconPicker'
 
@@ -187,13 +188,16 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
 
         <section className="cardish">
           <h3>スキル取得</h3>
-          <p className="hint">解禁済みスキルから最大 {reg.maxAbilitiesPerChar} 個まで取得。</p>
+          <p className="hint">
+            解禁済みから最大 {reg.maxAbilitiesPerChar} 個。主行動は戦闘中ターンに1回、副行動は何度でも。ダメージは0〜100%連鎖抽選。
+          </p>
           <div className="ability-list">
             {SKILL_LINE_LIST.flatMap((line) =>
               line.abilityIds.map((id) => {
                 const ab = ABILITIES[id]
                 const open = unlocked.includes(id)
                 const taken = char.abilityIds.includes(id)
+                const dmg100 = baseDamageAt100(char, ab)
                 return (
                   <button
                     key={id}
@@ -205,10 +209,15 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
                     <strong>
                       {ab.name}
                       <em>
-                        {SKILL_LINES[ab.skillLine].name} Lv{ab.requiredLevel}
+                        {actionTypeLabel(ab.actionType)} ／ {SKILL_LINES[ab.skillLine].name} Lv
+                        {ab.requiredLevel}
                       </em>
                     </strong>
                     <span>{ab.description}</span>
+                    <span className="ability-meta">
+                      基礎威力 {ab.power} ／ 100%時 {dmg100}
+                      {ab.heal ? '回復' : 'dmg'} ／ 連鎖閾値 {ab.cascadeThreshold}%以上
+                    </span>
                   </button>
                 )
               }),

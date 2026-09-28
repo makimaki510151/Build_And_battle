@@ -4,7 +4,7 @@ import { applyAction, canMoveTo, dist, snapValue } from './battle'
 
 /**
  * テストプレイ用の簡易 AI。
- * 1体ずつ: 近距離の負傷味方を回復 → 接近移動 → 攻撃 → 待機。
+ * 移動1・主行動1・副行動（回復など）を適宜使用。
  */
 export function runSimpleNpcTurn(
   state: BattleState,
@@ -15,7 +15,6 @@ export function runSimpleNpcTurn(
   const myUnits = () => cur.units.filter((u) => u.ownerId === aiPlayerId && u.hp > 0)
 
   for (const unit of myUnits()) {
-    if (unit.acted) continue
     cur = actWithUnit(cur, unit.uid, aiPlayerId, humanPlayerId)
   }
 
@@ -30,40 +29,43 @@ function actWithUnit(
 ): BattleState {
   let cur = state
   const unit = () => cur.units.find((u) => u.uid === unitUid)!
-  if (!unit() || unit().hp <= 0 || unit().acted) return cur
+  if (!unit() || unit().hp <= 0) return cur
 
   const allies = () => cur.units.filter((u) => u.ownerId === aiPlayerId && u.hp > 0)
   const foes = () => cur.units.filter((u) => u.ownerId === humanPlayerId && u.hp > 0)
-  if (foes().length === 0) {
-    return applyAction(cur, aiPlayerId, { kind: 'wait', unitUid })
-  }
+  if (foes().length === 0) return cur
 
-  // Heal wounded ally if possible
-  const healId = pickHealAbility(unit())
+  // 副: 負傷味方を回復
+  const healId = pickAbility(unit(), (a) => !!a.heal && a.actionType === 'sub')
+    ?? pickAbility(unit(), (a) => !!a.heal)
   if (healId) {
     const wounded = allies()
       .filter((a) => a.hp < a.maxHp * 0.55)
       .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0]
     const heal = ABILITIES[healId]
     if (wounded && heal && dist(unit().x, unit().y, wounded.x, wounded.y) <= heal.range + 8) {
-      return applyAction(cur, aiPlayerId, {
-        kind: 'ability',
-        unitUid,
-        abilityId: healId,
-        tx: wounded.x,
-        ty: wounded.y,
-      })
+      if (!(heal.actionType === 'main' && unit().mainUsed)) {
+        cur = applyAction(cur, aiPlayerId, {
+          kind: 'ability',
+          unitUid,
+          abilityId: healId,
+          tx: wounded.x,
+          ty: wounded.y,
+        })
+      }
     }
   }
 
   const target = foes().sort(
     (a, b) => dist(unit().x, unit().y, a.x, a.y) - dist(unit().x, unit().y, b.x, b.y),
   )[0]
+  if (!target) return cur
 
-  const attackId = pickAttackAbility(unit(), target)
+  const attackId =
+    pickAbility(unit(), (a) => !a.heal && a.actionType === 'main') ??
+    pickAbility(unit(), (a) => !a.heal)
   const attack = attackId ? ABILITIES[attackId] : null
 
-  // Move closer if needed
   if (attack && !unit().moved && dist(unit().x, unit().y, target.x, target.y) > attack.range) {
     const dest = stepToward(unit(), target, cur)
     if (dest) {
@@ -71,11 +73,13 @@ function actWithUnit(
     }
   }
 
-  if (unit().acted) return cur
-
-  // Attack if in range
-  if (attack && dist(unit().x, unit().y, target.x, target.y) <= attack.range + 8) {
-    return applyAction(cur, aiPlayerId, {
+  // 主行動攻撃
+  if (
+    attack &&
+    !(attack.actionType === 'main' && unit().mainUsed) &&
+    dist(unit().x, unit().y, target.x, target.y) <= attack.range + 8
+  ) {
+    cur = applyAction(cur, aiPlayerId, {
       kind: 'ability',
       unitUid,
       abilityId: attack.id,
@@ -84,7 +88,21 @@ function actWithUnit(
     })
   }
 
-  // Try move then wait
+  // 副行動で追撃（弱攻撃など）
+  const subId = pickAbility(unit(), (a) => !a.heal && a.actionType === 'sub')
+  if (subId) {
+    const sub = ABILITIES[subId]
+    if (sub && dist(unit().x, unit().y, target.x, target.y) <= sub.range + 8) {
+      cur = applyAction(cur, aiPlayerId, {
+        kind: 'ability',
+        unitUid,
+        abilityId: subId,
+        tx: target.x,
+        ty: target.y,
+      })
+    }
+  }
+
   if (!unit().moved) {
     const dest = stepToward(unit(), target, cur)
     if (dest) {
@@ -92,33 +110,16 @@ function actWithUnit(
     }
   }
 
-  if (!unit().acted) {
-    cur = applyAction(cur, aiPlayerId, { kind: 'wait', unitUid })
-  }
   return cur
 }
 
-function pickHealAbility(unit: BattleUnit): string | null {
-  for (const id of unit.character.abilityIds) {
-    const a = ABILITIES[id]
-    if (a?.heal) return id
-  }
-  return null
-}
-
-function pickAttackAbility(unit: BattleUnit, target: BattleUnit): string | null {
+function pickAbility(unit: BattleUnit, pred: (a: AbilityDef) => boolean): string | null {
   const options = unit.character.abilityIds
     .map((id) => ABILITIES[id])
-    .filter((a): a is AbilityDef => !!a && !a.heal)
-
-  if (options.length === 0) return null
-
-  const d = dist(unit.x, unit.y, target.x, target.y)
-  // Prefer something that can reach now; else highest power
-  const reachable = options.filter((a) => a.range >= d || a.range === 0)
-  const pool = reachable.length ? reachable : options
-  pool.sort((a, b) => b.power - a.power)
-  return pool[0].id
+    .filter((a): a is AbilityDef => !!a && pred(a))
+  if (!options.length) return null
+  options.sort((a, b) => b.power - a.power)
+  return options[0].id
 }
 
 function stepToward(
@@ -129,13 +130,12 @@ function stepToward(
   const dx = target.x - unit.x
   const dy = target.y - unit.y
   const len = Math.hypot(dx, dy) || 1
-  const reach = Math.min(unit.move, len - 50) // stop short of stacking
-  if (reach < SNAP_MIN) return null
+  const reach = Math.min(unit.move, len - 50)
+  if (reach < 20) return null
   const tx = snapValue(unit.x + (dx / len) * reach)
   const ty = snapValue(unit.y + (dy / len) * reach)
   if (canMoveTo(state, unit, tx, ty)) return { x: tx, y: ty }
 
-  // Try a few angled alternatives
   for (const angle of [0.4, -0.4, 0.8, -0.8]) {
     const cos = Math.cos(angle)
     const sin = Math.sin(angle)
@@ -147,5 +147,3 @@ function stepToward(
   }
   return null
 }
-
-const SNAP_MIN = 20
