@@ -123,7 +123,7 @@ export function MatchLobby({ teams, playerName, onBack, onMatched }: Props) {
     const code = randomRoomCode()
     setRoomCode(code)
     setMode('host')
-    setStatus('シグナリング接続中…')
+    setStatus('P2Pルームを準備中…')
     const conn = new MatchConnection(handleMessage, setStatus, sendHelloWhenReady)
     bindConnection(conn, 'host', code)
     try {
