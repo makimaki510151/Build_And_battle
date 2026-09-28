@@ -351,7 +351,8 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
                     </span>
                     <span className="ability-meta">
                       威力{ab.power} · 100%時{dmg100}
-                      {ab.heal ? '回復' : ''} · 連鎖{ab.cascadeThreshold}%+
+                      {ab.heal ? '回復' : ''} · 出目50%±10
+                      {ab.actionType === 'sub' ? ' · 副(回復)' : ''}
                     </span>
                   </button>
                 )

@@ -9,6 +9,7 @@ import {
   decideInitiative,
   dist,
   getBattlefieldSize,
+  hasValidAbilityTarget,
   SNAP,
   snapValue,
 } from '../lib/battle'
@@ -117,7 +118,7 @@ export function BattleView(props: Props) {
           ...structuredClone(cur),
           phase: 'ended',
           winnerId: localPlayerId,
-          log: ['相手が降参しました', ...cur.log],
+          log: [...cur.log, '相手が降参しました'],
         })
       }
     })
@@ -130,7 +131,7 @@ export function BattleView(props: Props) {
           : decision.method === 'host'
             ? 'ホスト希望により先攻決定'
             : 'ゲスト希望により先攻決定'
-      battle.log.unshift(`${method} → 先攻プレイヤー確定`)
+      battle.log.push(`${method} → 先攻プレイヤー確定`)
       commit(battle)
     } else {
       connection.send({ type: 'ready', playerId: localPlayerId })
@@ -259,30 +260,43 @@ export function BattleView(props: Props) {
           {selected ? (
             <UnitPanel
               unit={selected}
+              battleState={state}
               mine={selected.ownerId === localPlayerId}
               myTurn={myTurn}
               mode={mode}
               abilityId={abilityId}
-              onMove={() => setMode('move')}
+              onMove={() => setMode(mode === 'move' ? 'none' : 'move')}
               onWait={() => dispatch({ kind: 'wait', unitUid: selected.uid })}
               onAbility={(id) => {
+                if (mode === 'ability' && abilityId === id) {
+                  setAbilityId(null)
+                  setMode('none')
+                  return
+                }
                 setAbilityId(id)
+                setItemId(null)
                 setMode('ability')
               }}
               onItem={(id) => {
+                if (mode === 'item' && itemId === id) {
+                  setItemId(null)
+                  setMode('none')
+                  return
+                }
                 setItemId(id)
+                setAbilityId(null)
                 setMode('item')
               }}
             />
           ) : (
             <p className="hint">
-              自軍ユニットを選択。移動1回・主行動1回・副行動は何度でも。スキルダメージは0〜100%連鎖抽選（規定％以上で追加）。
+              自軍ユニットを選択。移動・主行動は各1回。副行動（回復）は種類ごとに1回。ダメージは基準50%±10。
             </p>
           )}
 
           <div className="log">
-            {state.log.slice(0, 8).map((line, i) => (
-              <p key={`${i}-${line}`}>{line}</p>
+            {state.log.slice(-12).map((line, i) => (
+              <p key={`${state.log.length - 12 + i}-${line}`}>{line}</p>
             ))}
           </div>
 
@@ -308,6 +322,7 @@ export function BattleView(props: Props) {
 
 function UnitPanel({
   unit,
+  battleState,
   mine,
   myTurn,
   mode,
@@ -318,6 +333,7 @@ function UnitPanel({
   onItem,
 }: {
   unit: BattleUnit
+  battleState: BattleState
   mine: boolean
   myTurn: boolean
   mode: SelectMode
@@ -335,13 +351,13 @@ function UnitPanel({
         HP {unit.hp}/{unit.maxHp} ／ 移動 {unit.move}
       </p>
       <p>
-        移動: {unit.moved ? '済' : '可'} ／ 主行動: {unit.mainUsed ? '済' : '可'} ／ 副行動: 何度でも
+        移動: {unit.moved ? '済' : '可'} ／ 主行動: {unit.mainUsed ? '済' : '可'} ／ 副行動: 種類ごと1回
       </p>
       {selectedAbility && (
         <p className="hint">
           {selectedAbility.name}（{actionTypeLabel(selectedAbility.actionType)}）基礎威力{' '}
           {selectedAbility.power} ／ 100%時 {baseDamageAt100(unit.character, selectedAbility)}
-          {selectedAbility.heal ? '回復' : 'dmg'} ／ 連鎖 {selectedAbility.cascadeThreshold}%以上
+          {selectedAbility.heal ? '回復' : 'dmg'} ／ 出目 50%±10
         </p>
       )}
       {mine && myTurn && (
@@ -358,8 +374,10 @@ function UnitPanel({
             const ab = ABILITIES[id]
             if (!ab) return null
             const blockedMain = ab.actionType === 'main' && unit.mainUsed
+            const blockedSub = ab.actionType === 'sub' && unit.usedSubIds.includes(id)
             const blockedWeapon = !meetsWeaponRequirement(unit.character, ab)
-            const blocked = blockedMain || blockedWeapon
+            const blockedTarget = !hasValidAbilityTarget(battleState, unit, ab)
+            const blocked = blockedMain || blockedSub || blockedWeapon || blockedTarget
             return (
               <button
                 key={id}
@@ -368,9 +386,13 @@ function UnitPanel({
                 disabled={blocked}
                 onClick={() => onAbility(id)}
                 title={
-                  blockedWeapon && ab.requiredWeapon
-                    ? `${WEAPON_TYPE_LABELS[ab.requiredWeapon]}が必要`
-                    : ab.description
+                  blockedTarget
+                    ? '射程内に対象がいません'
+                    : blockedWeapon && ab.requiredWeapon
+                      ? `${WEAPON_TYPE_LABELS[ab.requiredWeapon]}が必要`
+                      : blockedSub
+                        ? 'この副行動は使用済み'
+                        : ab.description
                 }
               >
                 {ab.name}
@@ -388,11 +410,13 @@ function UnitPanel({
               <button
                 key={id}
                 type="button"
-                disabled={(unit.itemCharges[id] ?? 0) <= 0}
+                disabled={
+                  (unit.itemCharges[id] ?? 0) <= 0 || unit.usedSubIds.includes(`item:${id}`)
+                }
                 onClick={() => onItem(id)}
               >
                 {ITEMS[id].name}×{unit.itemCharges[id] ?? 0}
-                <small> [副]</small>
+                <small> [副·1回]</small>
               </button>
             ))}
           <button type="button" onClick={onWait}>
@@ -403,6 +427,7 @@ function UnitPanel({
     </div>
   )
 }
+
 
 function drawBattle(
   ctx: CanvasRenderingContext2D,

@@ -1,10 +1,10 @@
 import { ABILITIES } from '../data/skills'
 import type { AbilityDef, BattleState, BattleUnit } from '../types/game'
-import { applyAction, canMoveTo, dist, snapValue } from './battle'
+import { applyAction, canMoveTo, dist, hasValidAbilityTarget, snapValue } from './battle'
 
 /**
  * テストプレイ用の簡易 AI。
- * 移動1・主行動1・副行動（回復など）を適宜使用。
+ * 移動1・主行動1・副行動（回復のみ・種類ごと1回）。
  */
 export function runSimpleNpcTurn(
   state: BattleState,
@@ -35,24 +35,24 @@ function actWithUnit(
   const foes = () => cur.units.filter((u) => u.ownerId === humanPlayerId && u.hp > 0)
   if (foes().length === 0) return cur
 
-  // 副: 負傷味方を回復
-  const healId = pickAbility(unit(), (a) => !!a.heal && a.actionType === 'sub')
-    ?? pickAbility(unit(), (a) => !!a.heal)
+  // 副: 回復のみ
+  const healId = pickAbility(
+    unit(),
+    (a) => !!a.heal && a.actionType === 'sub' && !unit().usedSubIds.includes(a.id),
+  )
   if (healId) {
+    const ab = ABILITIES[healId]
     const wounded = allies()
       .filter((a) => a.hp < a.maxHp * 0.55)
       .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0]
-    const heal = ABILITIES[healId]
-    if (wounded && heal && dist(unit().x, unit().y, wounded.x, wounded.y) <= heal.range + 8) {
-      if (!(heal.actionType === 'main' && unit().mainUsed)) {
-        cur = applyAction(cur, aiPlayerId, {
-          kind: 'ability',
-          unitUid,
-          abilityId: healId,
-          tx: wounded.x,
-          ty: wounded.y,
-        })
-      }
+    if (wounded && ab && hasValidAbilityTarget(cur, unit(), ab)) {
+      cur = applyAction(cur, aiPlayerId, {
+        kind: 'ability',
+        unitUid,
+        abilityId: healId,
+        tx: wounded.x,
+        ty: wounded.y,
+      })
     }
   }
 
@@ -61,9 +61,7 @@ function actWithUnit(
   )[0]
   if (!target) return cur
 
-  const attackId =
-    pickAbility(unit(), (a) => !a.heal && a.actionType === 'main') ??
-    pickAbility(unit(), (a) => !a.heal)
+  const attackId = pickAbility(unit(), (a) => !a.heal && a.actionType === 'main' && !unit().mainUsed)
   const attack = attackId ? ABILITIES[attackId] : null
 
   if (attack && !unit().moved && dist(unit().x, unit().y, target.x, target.y) > attack.range) {
@@ -73,10 +71,10 @@ function actWithUnit(
     }
   }
 
-  // 主行動攻撃
   if (
     attack &&
-    !(attack.actionType === 'main' && unit().mainUsed) &&
+    !unit().mainUsed &&
+    hasValidAbilityTarget(cur, unit(), attack) &&
     dist(unit().x, unit().y, target.x, target.y) <= attack.range + 8
   ) {
     cur = applyAction(cur, aiPlayerId, {
@@ -86,21 +84,6 @@ function actWithUnit(
       tx: target.x,
       ty: target.y,
     })
-  }
-
-  // 副行動で追撃（弱攻撃など）
-  const subId = pickAbility(unit(), (a) => !a.heal && a.actionType === 'sub')
-  if (subId) {
-    const sub = ABILITIES[subId]
-    if (sub && dist(unit().x, unit().y, target.x, target.y) <= sub.range + 8) {
-      cur = applyAction(cur, aiPlayerId, {
-        kind: 'ability',
-        unitUid,
-        abilityId: subId,
-        tx: target.x,
-        ty: target.y,
-      })
-    }
   }
 
   if (!unit().moved) {

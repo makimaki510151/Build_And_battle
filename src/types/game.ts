@@ -76,8 +76,8 @@ export interface AbilityDef {
   power: number
   powerStat: StatId
   /**
-   * 連鎖閾値（0〜100）。出目がこの値以上なら追加で 0〜100% を抽選し続ける。
-   * 上限回数なし。
+   * 連鎖閾値（互換用・現行ダメージは基準50%±10）。
+   * @deprecated
    */
   cascadeThreshold: number
   /** 指定時、該当 weaponType の武器を1つ以上所持している必要あり */
@@ -141,9 +141,11 @@ export interface BattleUnit {
   hp: number
   maxHp: number
   move: number
-  /** 主行動を使い切ったか（副行動は制限なし） */
+  /** 主行動を使い切ったか */
   mainUsed: boolean
   moved: boolean
+  /** このターン既に使った副行動スキルID（同一副行動は1回まで） */
+  usedSubIds: string[]
   itemCharges: Record<string, number>
 }
 
