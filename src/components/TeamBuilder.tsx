@@ -28,14 +28,67 @@ interface Props {
   onSave: () => void
 }
 
+type EditTab = 'basic' | 'skills' | 'abilities' | 'stats' | 'items'
+type AbilityFilter = 'available' | 'taken' | 'all'
+type ItemSlotFilter = 'all' | 'weapon' | 'armor' | 'accessory' | 'consumable'
+
+const EDIT_TABS: { id: EditTab; label: string }[] = [
+  { id: 'basic', label: '基本' },
+  { id: 'skills', label: '技能' },
+  { id: 'abilities', label: 'スキル' },
+  { id: 'stats', label: 'ステ' },
+  { id: 'items', label: '装備' },
+]
+
+const ITEM_SLOT_FILTERS: { id: ItemSlotFilter; label: string }[] = [
+  { id: 'all', label: 'すべて' },
+  { id: 'weapon', label: '武器' },
+  { id: 'armor', label: '防具' },
+  { id: 'accessory', label: '装飾' },
+  { id: 'consumable', label: '消耗' },
+]
+
 export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
   const [selected, setSelected] = useState(0)
+  const [editTab, setEditTab] = useState<EditTab>('basic')
+  const [abilityFilter, setAbilityFilter] = useState<AbilityFilter>('available')
+  const [abilityLine, setAbilityLine] = useState<SkillLineId | 'all'>('all')
+  const [itemSlot, setItemSlot] = useState<ItemSlotFilter>('all')
+  const [hideIdleSkills, setHideIdleSkills] = useState(false)
+
   const reg = REGULATIONS[team.regulationId]
   const char = team.characters[selected]
   const issues = useMemo(() => validateTeam(team), [team])
   const stats = computeStats(char)
   const unlocked = unlockedAbilities(char)
+  const unlockedSet = useMemo(() => new Set(unlocked), [unlocked])
   const remStats = remainingStatPoints(char, team.regulationId)
+
+  const abilityEntries = useMemo(() => {
+    return SKILL_LINE_LIST.flatMap((line) =>
+      line.abilityIds.map((id) => {
+        const ab = ABILITIES[id]
+        const open = unlockedSet.has(id)
+        const taken = char.abilityIds.includes(id)
+        return { id, ab, open, taken, lineId: line.id }
+      }),
+    ).filter((row) => {
+      if (abilityLine !== 'all' && row.lineId !== abilityLine) return false
+      if (abilityFilter === 'available') return row.open || row.taken
+      if (abilityFilter === 'taken') return row.taken
+      return true
+    })
+  }, [abilityFilter, abilityLine, char.abilityIds, unlockedSet])
+
+  const visibleSkillLines = useMemo(() => {
+    if (!hideIdleSkills) return SKILL_LINE_LIST
+    return SKILL_LINE_LIST.filter((line) => skillLevel(char, line.id) > 0)
+  }, [char, hideIdleSkills])
+
+  const visibleItems = useMemo(() => {
+    if (itemSlot === 'all') return ITEM_LIST
+    return ITEM_LIST.filter((item) => item.slot === itemSlot)
+  }, [itemSlot])
 
   const updateChar = (patch: Partial<CharacterBuild>) => {
     const characters = team.characters.map((c, i) => (i === selected ? { ...c, ...patch } : c))
@@ -47,7 +100,6 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
     const v = Math.max(0, Math.min(reg.maxSkillLevel, value))
     if (v === 0) delete skillXp[line]
     else skillXp[line] = v
-    // drop abilities no longer unlocked
     const next = { ...char, skillXp }
     const ok = new Set(unlockedAbilities(next))
     updateChar({
@@ -113,8 +165,8 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
           資産 {teamUsedAssets(team)} / {reg.teamAssets}
         </span>
         <span>
-          技能上限 Lv{reg.maxSkillLevel} / 技能数{reg.maxSkillLinesPerChar} / スキル
-          {reg.maxAbilitiesPerChar}
+          技能Lv上限 {reg.maxSkillLevel} ／ 技能数 {reg.maxSkillLinesPerChar} ／ スキル{' '}
+          {char.abilityIds.length}/{reg.maxAbilitiesPerChar}
         </span>
       </div>
 
@@ -132,45 +184,74 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
         ))}
       </div>
 
-      <div className="builder-grid">
-        <section className="cardish">
+      <div className="edit-tabs" role="tablist">
+        {EDIT_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={editTab === tab.id}
+            className={editTab === tab.id ? 'chip active' : 'chip'}
+            onClick={() => setEditTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {editTab === 'basic' && (
+        <section className="cardish builder-pane">
           <h3>基本</h3>
-          <label>
-            名前
-            <input value={char.name} onChange={(e) => updateChar({ name: e.target.value })} />
-          </label>
-          <label>
-            種族
-            <select
-              value={char.raceId}
-              onChange={(e) => updateChar({ raceId: e.target.value as CharacterBuild['raceId'] })}
-            >
-              {RACE_LIST.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="basic-grid">
+            <label>
+              名前
+              <input value={char.name} onChange={(e) => updateChar({ name: e.target.value })} />
+            </label>
+            <label>
+              種族
+              <select
+                value={char.raceId}
+                onChange={(e) => updateChar({ raceId: e.target.value as CharacterBuild['raceId'] })}
+              >
+                {RACE_LIST.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           <p className="hint">{RACE_LIST.find((r) => r.id === char.raceId)?.description}</p>
           <IconPicker value={char.icon} onChange={(icon) => updateChar({ icon })} />
           <p className="statline">
             メインLv {mainLevel(char)} ／ HP {computeMaxHp(char)} ／ 移動 {computeMove(char)}
           </p>
         </section>
+      )}
 
-        <section className="cardish">
-          <h3>技能（経験値配分）</h3>
-          <p className="hint">メインレベル = 技能レベルの最大値。チーム総経験値から割り振ります。</p>
-          <div className="skill-list">
-            {SKILL_LINE_LIST.map((line) => {
+      {editTab === 'skills' && (
+        <section className="cardish builder-pane">
+          <div className="pane-head">
+            <h3>技能（経験値配分）</h3>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={hideIdleSkills}
+                onChange={(e) => setHideIdleSkills(e.target.checked)}
+              />
+              振った技能だけ表示
+            </label>
+          </div>
+          <p className="hint">メインLv = 技能Lvの最大。残XP {reg.teamXp - teamUsedXp(team)}</p>
+          <div className="skill-list compact">
+            {(hideIdleSkills && visibleSkillLines.length === 0
+              ? SKILL_LINE_LIST
+              : visibleSkillLines
+            ).map((line) => {
               const lv = skillLevel(char, line.id)
               return (
-                <div key={line.id} className="skill-row">
-                  <div>
-                    <strong>{line.name}</strong>
-                    <small>{line.description}</small>
-                  </div>
+                <div key={line.id} className="skill-row" title={line.description}>
+                  <strong>{line.name}</strong>
                   <div className="stepper">
                     <button type="button" onClick={() => setSkillXp(line.id, lv - 1)}>
                       −
@@ -185,18 +266,64 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
             })}
           </div>
         </section>
+      )}
 
-        <section className="cardish">
-          <h3>スキル取得</h3>
-          <p className="hint">
-            解禁済みから最大 {reg.maxAbilitiesPerChar} 個。主行動は戦闘中ターンに1回、副行動は何度でも。ダメージは0〜100%連鎖抽選。
-          </p>
-          <div className="ability-list">
-            {SKILL_LINE_LIST.flatMap((line) =>
-              line.abilityIds.map((id) => {
-                const ab = ABILITIES[id]
-                const open = unlocked.includes(id)
-                const taken = char.abilityIds.includes(id)
+      {editTab === 'abilities' && (
+        <section className="cardish builder-pane">
+          <div className="pane-head">
+            <h3>スキル取得</h3>
+            <span className="hint tight">
+              {char.abilityIds.length}/{reg.maxAbilitiesPerChar}
+            </span>
+          </div>
+
+          <div className="filter-bar">
+            <div className="chip-row">
+              {(
+                [
+                  { id: 'available', label: '取得可能' },
+                  { id: 'taken', label: '取得済み' },
+                  { id: 'all', label: 'すべて' },
+                ] as const
+              ).map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  className={abilityFilter === f.id ? 'chip active' : 'chip'}
+                  onClick={() => setAbilityFilter(f.id)}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            <div className="chip-row wrap">
+              <button
+                type="button"
+                className={abilityLine === 'all' ? 'chip active' : 'chip'}
+                onClick={() => setAbilityLine('all')}
+              >
+                全系統
+              </button>
+              {SKILL_LINE_LIST.filter(
+                (line) => abilityFilter === 'all' || skillLevel(char, line.id) > 0,
+              ).map((line) => (
+                <button
+                  key={line.id}
+                  type="button"
+                  className={abilityLine === line.id ? 'chip active' : 'chip'}
+                  onClick={() => setAbilityLine(line.id)}
+                >
+                  {line.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {abilityEntries.length === 0 ? (
+            <p className="empty">該当スキルがありません。技能Lvを上げるか、表示条件を変えてください。</p>
+          ) : (
+            <div className="ability-list compact">
+              {abilityEntries.map(({ id, ab, open, taken }) => {
                 const dmg100 = baseDamageAt100(char, ab)
                 return (
                   <button
@@ -205,29 +332,34 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
                     disabled={!open && !taken}
                     className={taken ? 'ability taken' : open ? 'ability' : 'ability locked'}
                     onClick={() => toggleAbility(id)}
+                    title={ab.description}
                   >
-                    <strong>
-                      {ab.name}
-                      <em>
-                        {actionTypeLabel(ab.actionType)} ／ {SKILL_LINES[ab.skillLine].name} Lv
-                        {ab.requiredLevel}
-                      </em>
-                    </strong>
-                    <span>{ab.description}</span>
+                    <span className="ability-top">
+                      <strong>{ab.name}</strong>
+                      <span className="tags">
+                        <em className={ab.actionType}>{actionTypeLabel(ab.actionType)}</em>
+                        <em>
+                          {SKILL_LINES[ab.skillLine].name}
+                          {ab.requiredLevel}
+                        </em>
+                      </span>
+                    </span>
                     <span className="ability-meta">
-                      基礎威力 {ab.power} ／ 100%時 {dmg100}
-                      {ab.heal ? '回復' : 'dmg'} ／ 連鎖閾値 {ab.cascadeThreshold}%以上
+                      威力{ab.power} · 100%時{dmg100}
+                      {ab.heal ? '回復' : ''} · 連鎖{ab.cascadeThreshold}%+
                     </span>
                   </button>
                 )
-              }),
-            )}
-          </div>
+              })}
+            </div>
+          )}
         </section>
+      )}
 
-        <section className="cardish">
+      {editTab === 'stats' && (
+        <section className="cardish builder-pane">
           <h3>
-            ステータス（残り {remStats} / 付与 {availableStatPoints(char, team.regulationId)}）
+            ステータス（残り {remStats} / {availableStatPoints(char, team.regulationId)}）
           </h3>
           <div className="stat-grid">
             {STAT_IDS.map((id) => (
@@ -247,11 +379,30 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
             ))}
           </div>
         </section>
+      )}
 
-        <section className="cardish wide">
-          <h3>装備・アイテム（チーム資産）</h3>
-          <div className="item-grid">
-            {ITEM_LIST.map((item) => {
+      {editTab === 'items' && (
+        <section className="cardish builder-pane">
+          <div className="pane-head">
+            <h3>装備・アイテム</h3>
+            <span className="hint tight">
+              資産 {teamUsedAssets(team)}/{reg.teamAssets}
+            </span>
+          </div>
+          <div className="chip-row wrap">
+            {ITEM_SLOT_FILTERS.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                className={itemSlot === f.id ? 'chip active' : 'chip'}
+                onClick={() => setItemSlot(f.id)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="item-grid compact">
+            {visibleItems.map((item) => {
               const taken = char.itemIds.includes(item.id)
               return (
                 <button
@@ -259,19 +410,17 @@ export function TeamBuilder({ team, onChange, onBack, onSave }: Props) {
                   type="button"
                   className={taken ? 'item taken' : 'item'}
                   onClick={() => toggleItem(item.id)}
+                  title={item.description}
                 >
                   <strong>
                     {item.name} <em>{item.price}G</em>
                   </strong>
-                  <span>
-                    [{item.slot}] {item.description}
-                  </span>
                 </button>
               )
             })}
           </div>
         </section>
-      </div>
+      )}
 
       {issues.length > 0 && (
         <div className="issues">
