@@ -298,7 +298,7 @@ export function BattleView(props: Props) {
             />
           ) : (
             <p className="hint">
-              自軍ユニットを選択。移動・主行動は各1回。副行動（回復）は種類ごとに1回。ダメージは基準50%±10。
+              自軍ユニットを選択。移動・主行動は各1回。副行動（回復）は種類ごとに1回。ダメージは出目1〜100%。
             </p>
           )}
 
@@ -365,7 +365,7 @@ function UnitPanel({
         <p className="hint">
           {selectedAbility.name}（{actionTypeLabel(selectedAbility.actionType)}）基礎威力{' '}
           {selectedAbility.power} ／ 100%時 {baseDamageAt100(unit.character, selectedAbility)}
-          {selectedAbility.heal ? '回復' : 'dmg'} ／ 出目 50%±10
+          {selectedAbility.heal ? '回復' : 'dmg'} ／ 出目 1〜100%
         </p>
       )}
       {mine && myTurn && (
