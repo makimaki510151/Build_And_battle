@@ -123,7 +123,7 @@ export function MatchLobby({ teams, playerName, onBack, onMatched }: Props) {
     const code = randomRoomCode()
     setRoomCode(code)
     setMode('host')
-    setStatus('シグナリング接続中…')
+    setStatus('P2Pルームを準備中…')
     const conn = new MatchConnection(handleMessage, setStatus, sendHelloWhenReady)
     bindConnection(conn, 'host', code)
     try {
@@ -255,7 +255,8 @@ export function MatchLobby({ teams, playerName, onBack, onMatched }: Props) {
             </button>
           </div>
           <p className="hint">
-            GitHub Pages上でも PeerJS（WebRTC）でリアルタイム対戦します。同じレギュレーションのチーム同士のみ対戦できます。
+            シグナリングは公開Nostrリレー（Trystero）のみ。対戦データは端末同士のWebRTC直接通信です。自前サーバー不要でGitHub
+            Pagesからプレイできます。同じレギュレーションのチーム同士のみ対戦可能です。
           </p>
         </div>
       )}

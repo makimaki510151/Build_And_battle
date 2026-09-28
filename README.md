@@ -30,5 +30,7 @@ Pages の Source を `gh-pages` ブランチに設定してください。
 ## 技術
 
 - Vite + React + TypeScript
-- PeerJS（マッチング / 同期）
+- **サーバーレス P2P**: [Trystero](https://github.com/dmotz/trystero)（Nostrリレーでシグナリング）+ WebRTC
+  - アプリ用バックエンド不要。GitHub Pages の静的ファイルだけでリアルタイム対戦可能
+  - ゲームデータはピア間で直接・暗号化送信（リレーにはシグナリング情報のみ）
 - localStorage（部隊保存）
