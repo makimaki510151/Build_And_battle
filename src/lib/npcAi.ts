@@ -1,10 +1,11 @@
 import { ABILITIES } from '../data/skills'
 import type { AbilityDef, BattleState, BattleUnit } from '../types/game'
 import { applyAction, canMoveTo, dist, hasValidAbilityTarget, snapValue } from './battle'
+import { getEffectiveMove, isBuffKind } from './status'
 
 /**
  * テストプレイ用の簡易 AI。
- * 移動1・主行動1・副行動（回復のみ・種類ごと1回）。
+ * 移動1・主行動1・副行動（回復／バフ／デバフ・種類ごと1回）。
  */
 export function runSimpleNpcTurn(
   state: BattleState,
@@ -35,7 +36,7 @@ function actWithUnit(
   const foes = () => cur.units.filter((u) => u.ownerId === humanPlayerId && u.hp > 0)
   if (foes().length === 0) return cur
 
-  // 副: 回復のみ
+  // 副: 回復
   const healId = pickAbility(
     unit(),
     (a) => !!a.heal && a.actionType === 'sub' && !unit().usedSubIds.includes(a.id),
@@ -56,12 +57,63 @@ function actWithUnit(
     }
   }
 
+  // 副: デバフ
+  const debuffId = pickAbility(
+    unit(),
+    (a) =>
+      a.actionType === 'sub' &&
+      !!a.statusEffect &&
+      !isBuffKind(a.statusEffect.kind) &&
+      !unit().usedSubIds.includes(a.id),
+  )
+  if (debuffId) {
+    const ab = ABILITIES[debuffId]
+    const foe = foes().sort(
+      (a, b) => dist(unit().x, unit().y, a.x, a.y) - dist(unit().x, unit().y, b.x, b.y),
+    )[0]
+    if (ab && foe && hasValidAbilityTarget(cur, unit(), ab)) {
+      cur = applyAction(cur, aiPlayerId, {
+        kind: 'ability',
+        unitUid,
+        abilityId: debuffId,
+        tx: foe.x,
+        ty: foe.y,
+      })
+    }
+  }
+
+  // 副: バフ
+  const buffId = pickAbility(
+    unit(),
+    (a) =>
+      a.actionType === 'sub' &&
+      !!a.statusEffect &&
+      isBuffKind(a.statusEffect.kind) &&
+      !unit().usedSubIds.includes(a.id),
+  )
+  if (buffId) {
+    const ab = ABILITIES[buffId]
+    const ally = allies()[0]
+    if (ab && ally && hasValidAbilityTarget(cur, unit(), ab)) {
+      cur = applyAction(cur, aiPlayerId, {
+        kind: 'ability',
+        unitUid,
+        abilityId: buffId,
+        tx: ally.x,
+        ty: ally.y,
+      })
+    }
+  }
+
   const target = foes().sort(
     (a, b) => dist(unit().x, unit().y, a.x, a.y) - dist(unit().x, unit().y, b.x, b.y),
   )[0]
   if (!target) return cur
 
-  const attackId = pickAbility(unit(), (a) => !a.heal && a.actionType === 'main' && !unit().mainUsed)
+  const attackId = pickAbility(
+    unit(),
+    (a) => !a.heal && !a.statusEffect && a.actionType === 'main' && !unit().mainUsed,
+  )
   const attack = attackId ? ABILITIES[attackId] : null
 
   if (attack && !unit().moved && dist(unit().x, unit().y, target.x, target.y) > attack.range) {
@@ -113,7 +165,7 @@ function stepToward(
   const dx = target.x - unit.x
   const dy = target.y - unit.y
   const len = Math.hypot(dx, dy) || 1
-  const reach = Math.min(unit.move, len - 50)
+  const reach = Math.min(getEffectiveMove(unit), len - 50)
   if (reach < 20) return null
   const tx = snapValue(unit.x + (dx / len) * reach)
   const ty = snapValue(unit.y + (dy / len) * reach)
